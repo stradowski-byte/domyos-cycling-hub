@@ -8,5 +8,5 @@ To repozytorium zawiera **wyłącznie czysty silnik aplikacji**.
 
 ## Instalacja PWA na telefonie (Android Chrome)
 1. Otwórz adres GitHub Pages tego repozytorium: `https://stradowski-byte.github.io/domyos-cycling-hub/`
-2. Kliknij **Zainstaluj PWA** (lub w menu Chrome: *Dodaj do ekranu głównego*).
-3. Aplikacja automatycznie pobiera nowe wydania (Releases) z tego repozytorium przy zachowaniu 100% lokalnych danych treningowych.
+2. Kliknij **Zainstaluj Apkę** (lub w menu Chrome: *Zainstaluj aplikację / Dodaj do ekranu głównego*).
+3. Aplikacja działa w 100% offline (zapis treningów `.FIT` w pamięci wewnętrznej `OPFS` z kolejką `Pending Sync` po włączeniu WiFi) i automatycznie pobiera nowe wydania z tego repozytorium.
