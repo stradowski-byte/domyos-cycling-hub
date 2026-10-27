@@ -1,4 +1,4 @@
-const CACHE_NAME = 'domyos-cycling-hub-v1.8.1';
+const CACHE_NAME = 'domyos-cycling-hub-v1.9.0';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -10,11 +10,21 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(CORE_ASSETS))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(
+        CORE_ASSETS.map((assetUrl) =>
+          fetch(assetUrl, { cache: 'no-store' })
+            .then((res) => {
+              if (res && res.ok) {
+                return cache.put(assetUrl, res);
+              }
+            })
+            .catch(() => {})
+        )
+      )
+    )
   );
 });
 
@@ -22,10 +32,24 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-      )
-      .then(() => self.clients.claim())
+      .then(async (keys) => {
+        const oldKeys = keys.filter((k) => k !== CACHE_NAME);
+        await Promise.all(oldKeys.map((k) => caches.delete(k)));
+        await self.clients.claim();
+        if (oldKeys.length > 0) {
+          const windowClients = await self.clients.matchAll({ type: 'window' });
+          for (const client of windowClients) {
+            try {
+              client.postMessage({ type: 'SW_CACHE_UPDATED', version: CACHE_NAME });
+              if ('navigate' in client) {
+                await client.navigate(client.url);
+              }
+            } catch {
+              // ignore navigation error
+            }
+          }
+        }
+      })
   );
 });
 
@@ -54,10 +78,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin app shell & JS/CSS bundles: Network-first with instant Offline Cache fallback
+  // Same-origin app shell & JS/CSS bundles: Network-first (bypassing stale disk cache) with instant Offline Cache fallback
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-cache' })
         .then((res) => {
           if (res && res.status === 200) {
             const copy = res.clone();
