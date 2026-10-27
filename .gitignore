@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env*
+!.env.example
+*.fit
+*.tcx
+*profile_state*.json
+*domyos_hub_state*.json
