@@ -1,18 +1,36 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "Domyos Cycling Hub — FTMS & Intervals.icu",
   "short_name": "DomyosHub",
   "description": "Komputer treningowy FTMS dla roweru Domyos Challenge Bike z algorytmem płynnych ramp, obsługą dwóch profili, eksportem .FIT i synchronizacją Google Drive.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0B0F17",
   "theme_color": "#0B0F17",
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "192x192 512x512",
+      "src": "./pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     }
