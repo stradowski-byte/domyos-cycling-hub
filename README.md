@@ -1,4 +1,4 @@
-# Domyos Cycling Hub (Clean Production Release v1.9.0)
+# Domyos Cycling Hub (Clean Production Release v1.9.1)
 
 Czysty kod produkcyjny aplikacji **Domyos Cycling Hub (PWA)** do sterowania rowerem **Domyos Challenge Bike (FTMS Bluetooth)**.
 
