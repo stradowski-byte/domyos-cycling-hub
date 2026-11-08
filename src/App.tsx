@@ -33,7 +33,7 @@ import {
   calculateActivitySummary,
   calculateBlockInstantTarget,
   calculateLocalWellnessSeries,
-  DEFAULT_PROFILES,
+  createFallbackRuntimeProfile,
   getInitialWorkouts,
 } from './services/rampAndPhysiologyEngine';
 import { ftmsController } from './services/ftmsBluetooth';
@@ -43,6 +43,9 @@ import {
   downloadActivityTcxFile,
 } from './services/fitEncoder';
 import {
+  AI_STUDIO_PWA_BYPASS_KEY,
+  isAIStudioPreviewEnvironment,
+  isConfigured,
   signInRiderWithGoogle,
   signOutGoogleRider,
   subscribeToGoogleAuth,
@@ -53,6 +56,7 @@ import {
   deleteWorkoutTxtFromLocalOpfs,
   ensureActivityHasRecords,
   fetchAllStateFromFirestore,
+  filterGoogleAuthenticatedProfiles,
   getConfiguredRootFolderName,
   getKnownGoogleRiders,
   initializeOfflineFolderStructure,
@@ -81,6 +85,7 @@ import { AnalyticsAndProgressView } from './components/AnalyticsAndProgressView'
 import { AthleteProfilesView } from './components/AthleteProfilesView';
 import { ProfilesAndCloudSettingsView } from './components/ProfilesAndCloudSettingsView';
 import { FastUserSwitcherModal } from './components/FastUserSwitcherModal';
+import { PwaAndAuthGateScreen } from './components/PwaAndAuthGateScreen';
 
 const LS_PROFILES_KEY = 'domyos_hub_profiles_v1';
 const LS_WORKOUTS_KEY = 'domyos_hub_workouts_v1';
@@ -116,20 +121,20 @@ export default function App() {
     }
   }, [themeMode]);
 
-  // Dynamic Multi-User Profiles State (Zero hardcoded personal names)
+  // Dynamic Google-Authenticated Multi-User Profiles State (Zero pre-created or default profiles)
   const [profiles, setProfiles] = useState<Record<ProfileId, AthleteProfile>>(() => {
     try {
       const saved = localStorage.getItem(LS_PROFILES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          return parsed;
+        if (parsed && typeof parsed === 'object') {
+          return filterGoogleAuthenticatedProfiles(parsed);
         }
       }
     } catch {
       // fallback
     }
-    return DEFAULT_PROFILES;
+    return {};
   });
 
   const [activeProfileId, setActiveProfileId] = useState<ProfileId>(() => {
@@ -139,13 +144,13 @@ export default function App() {
     } catch {
       // fallback
     }
-    return Object.keys(profiles)[0] || 'default';
+    return Object.keys(profiles)[0] || '';
   });
 
   const activeProfile =
     profiles[activeProfileId] ||
     Object.values(profiles)[0] ||
-    DEFAULT_PROFILES.default;
+    createFallbackRuntimeProfile();
 
   // Workouts Library State
   const [workouts, setWorkouts] = useState<StructuredWorkout[]>(() => {
@@ -218,6 +223,15 @@ export default function App() {
   const { isInstallable, isInstalled, isIOS, isInIframe, install } = usePWAInstall();
   const [isPwaInstallGuideOpen, setIsPwaInstallGuideOpen] = useState(false);
   const [dismissedInstallBanner, setDismissedInstallBanner] = useState(false);
+  const [isAiStudioBypassActive, setIsAiStudioBypassActive] = useState<boolean>(
+    () => {
+      try {
+        return localStorage.getItem(AI_STUDIO_PWA_BYPASS_KEY) === 'true';
+      } catch {
+        return false;
+      }
+    }
+  );
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -346,7 +360,12 @@ export default function App() {
         // Start real-time Firestore listeners for shared household database
         unsubFirestore = subscribeToFirestoreHub({
           onProfilesSnapshot: (cloudProfiles) => {
-            setProfiles((prev) => ({ ...prev, ...cloudProfiles }));
+            const validCloudProfiles =
+              filterGoogleAuthenticatedProfiles(cloudProfiles);
+            setProfiles((prev) => ({
+              ...filterGoogleAuthenticatedProfiles(prev),
+              ...validCloudProfiles,
+            }));
           },
           onWorkoutsSnapshot: (cloudWorkouts) => {
             setWorkouts((prev) => {
@@ -792,9 +811,10 @@ export default function App() {
     );
   };
 
-  const handleAddNewGoogleRider = async () => {
+  const handleAddNewGoogleRider = async (loginHintEmail?: string) => {
     try {
       const res = await signInRiderWithGoogle({
+        loginHintEmail,
         requestGoogleFitScopes: true,
       });
       const { profile: newProf, updatedProfiles } =
@@ -808,6 +828,7 @@ export default function App() {
       );
     } catch (err: any) {
       showToast(err?.message || 'Logowanie Google OAuth nie powiodło się.');
+      throw err;
     }
   };
 
@@ -829,28 +850,6 @@ export default function App() {
     await signOutGoogleRider();
     setGoogleUser(null);
     showToast('Wylogowano z konta Google.');
-  };
-
-  const handleAddProfile = (newProfile: AthleteProfile) => {
-    setProfiles((prev) => {
-      const next = { ...prev, [newProfile.id]: newProfile };
-      try {
-        localStorage.setItem(LS_PROFILES_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-    setActiveProfileId(newProfile.id);
-    setIntervalsWellness(null);
-    saveProfileToFirestore(newProfile).catch(() => {});
-    initializeOfflineFolderStructure({
-      rootFolderName: getConfiguredRootFolderName() || 'DomyosCyclingHub',
-      cloudConnected: Boolean(googleUser),
-    }).catch(() => {});
-    showToast(
-      `Utworzono nowy profil „${newProfile.name}” (FTP: ${newProfile.ftpWatts} W) w Firebase i pamięci OPFS!`
-    );
   };
 
   const handleDeleteProfile = (idToRemove: ProfileId) => {
@@ -1227,6 +1226,42 @@ export default function App() {
     intervalsWellness && intervalsWellness.length > 0
       ? intervalsWellness
       : calculateLocalWellnessSeries(activities, activeProfile.id, 28);
+
+  const isPwaUnlocked =
+    isInstalled || (isAIStudioPreviewEnvironment() && isAiStudioBypassActive);
+
+  // STRICT 3-STAGE GATE:
+  // 1) Must be installed as Standalone PWA on mobile/tablet (or AI Studio preview bypass active)
+  // 2) Must have Firebase JSON configured in device memory
+  // 3) Must be authenticated with Google OAuth (profiles are created exclusively from Google accounts)
+  if (
+    !isPwaUnlocked ||
+    !isConfigured ||
+    !googleUser ||
+    Object.keys(profiles).length === 0
+  ) {
+    return (
+      <PwaAndAuthGateScreen
+        isPwaInstalled={isInstalled}
+        isPwaInstallable={isInstallable}
+        isIOS={isIOS}
+        isAiStudioBypassActive={isAiStudioBypassActive}
+        onActivateAiStudioBypass={() => {
+          try {
+            localStorage.setItem(AI_STUDIO_PWA_BYPASS_KEY, 'true');
+          } catch {
+            // ignore
+          }
+          setIsAiStudioBypassActive(true);
+        }}
+        onInstallPwa={install}
+        onSignInGoogle={async (hintEmail?: string) => {
+          await handleAddNewGoogleRider(hintEmail);
+        }}
+        knownRiders={knownRiders}
+      />
+    );
+  }
 
   return (
     <div
@@ -1750,7 +1785,9 @@ export default function App() {
               setProfiles((prev) => ({ ...prev, [id]: updated }));
               saveProfileToFirestore(updated).catch(() => {});
             }}
-            onAddProfile={handleAddProfile}
+            onAddGoogleProfile={() => {
+              handleAddNewGoogleRider().catch(() => {});
+            }}
             onDeleteProfile={handleDeleteProfile}
             isSyncingIntervals={isSyncingIntervals}
             onSyncFromIntervalsIcu={handleSyncFromIntervalsIcu}

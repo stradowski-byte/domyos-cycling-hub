@@ -490,8 +490,8 @@ export const ProfilesAndCloudSettingsView: React.FC<
               <div className="text-xs font-bold text-white">
                 Konfiguracja JSON projektu Firebase (
                 {isUsingCustomConfig
-                  ? 'Własny JSON z localStorage'
-                  : 'Predefiniowany Centralny JSON'}
+                  ? 'Zapisana w pamięci urządzenia PWA (localStorage)'
+                  : 'Środowisko deweloperskie AI Studio'}
                 )
               </div>
               {isUsingCustomConfig && (
@@ -499,7 +499,7 @@ export const ProfilesAndCloudSettingsView: React.FC<
                   onClick={clearCustomFirebaseConfig}
                   className="px-3 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-xs font-semibold"
                 >
-                  Przywróć Predefiniowany JSON
+                  Usuń JSON z pamięci urządzenia
                 </button>
               )}
             </div>
@@ -514,7 +514,7 @@ export const ProfilesAndCloudSettingsView: React.FC<
                 onClick={handleSaveCustomFirebase}
                 className="min-h-[38px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
               >
-                Zapisz i Przeładuj Firebase
+                Zapisz w pamięci urządzenia i przeładuj
               </button>
             </div>
           </div>

@@ -29,8 +29,8 @@ import {
 import {
   computeDetailedHrBreakdown,
   computeRidePeakPowerAndHr,
+  createFallbackRuntimeProfile,
   createNewAthleteProfile,
-  DEFAULT_PROFILES,
   getCleanWorkoutTxtFileName,
   parseIcuTextFileToWorkout,
   PROFILE_AVATAR_COLORS,
@@ -38,7 +38,7 @@ import {
   serializeWorkoutToIcuTextFile,
 } from './rampAndPhysiologyEngine';
 
-export const CURRENT_APP_VERSION = '2.1.0';
+export const CURRENT_APP_VERSION = '2.2.0';
 const LS_OFFLINE_FS_MANIFEST_KEY = 'domyos_offline_fs_manifest_v1';
 const LS_PROFILES_KEY = 'domyos_hub_profiles_v1';
 
@@ -101,9 +101,23 @@ export function upsertKnownGoogleRider(rider: KnownGoogleRider): KnownGoogleRide
 }
 
 /**
- * Resolves or creates an AthleteProfile for the authenticated Google User.
- * Zero hardcoded personal names: uses the Google account's displayName/email
- * or links to an existing matching profile.
+ * Purges any legacy unauthenticated or default profiles so only Google OAuth profiles exist.
+ */
+export function filterGoogleAuthenticatedProfiles(
+  rawProfiles: Record<ProfileId, AthleteProfile>
+): Record<ProfileId, AthleteProfile> {
+  const cleaned: Record<ProfileId, AthleteProfile> = {};
+  for (const [key, prof] of Object.entries(rawProfiles || {})) {
+    if (prof && (prof.uid || prof.email) && key !== 'default') {
+      cleaned[key] = prof;
+    }
+  }
+  return cleaned;
+}
+
+/**
+ * Resolves or creates an AthleteProfile strictly for an authenticated Google User.
+ * Zero pre-created or anonymous profiles are allowed.
  */
 export function resolveOrCreateProfileForGoogleUser(
   user: User,
@@ -113,13 +127,14 @@ export function resolveOrCreateProfileForGoogleUser(
   updatedProfiles: Record<ProfileId, AthleteProfile>;
   isNew: boolean;
 } {
+  const googleOnlyProfiles = filterGoogleAuthenticatedProfiles(existingProfiles);
   const email = (user.email || '').toLowerCase();
   const displayName =
     user.displayName?.trim() ||
     (email ? email.split('@')[0] : 'Zawodnik Google');
 
-  // 1. Match by uid or email
-  const existingList = Object.values(existingProfiles);
+  // 1. Match existing Google-authenticated profile by uid or email
+  const existingList = Object.values(googleOnlyProfiles);
   const matchedByUidOrEmail = existingList.find(
     (p) =>
       (p.uid && p.uid === user.uid) ||
@@ -140,52 +155,21 @@ export function resolveOrCreateProfileForGoogleUser(
     };
     return {
       profile: updated,
-      updatedProfiles: { ...existingProfiles, [updated.id]: updated },
+      updatedProfiles: { ...googleOnlyProfiles, [updated.id]: updated },
       isNew: false,
     };
   }
 
-  // 2. If only the untouched 'default' placeholder profile exists, bind it to this first Google rider
-  if (
-    existingList.length === 1 &&
-    existingProfiles.default &&
-    !existingProfiles.default.uid &&
-    existingProfiles.default.name === 'Domyślny Profil'
-  ) {
-    const slugId = sanitizeProfileSlug(displayName, []);
-    const boundProfile: AthleteProfile = {
-      ...existingProfiles.default,
-      id: slugId,
-      uid: user.uid,
-      email: user.email || '',
-      photoURL: user.photoURL || undefined,
-      name: displayName,
-      subtitle: 'Konto Google + Firebase + Google Fit & Intervals.icu',
-      googleFit: {
-        enabled: true,
-        autoUploadActivities: true,
-      },
-      updatedAtIso: new Date().toISOString(),
-    };
-    const copy = { ...existingProfiles };
-    delete copy.default;
-    copy[slugId] = boundProfile;
-    return {
-      profile: boundProfile,
-      updatedProfiles: copy,
-      isNew: false,
-    };
-  }
-
-  // 3. Create a brand new profile for this Google account
+  // 2. Create a brand new profile for this authenticated Google account
   const colorIdx = existingList.length % PROFILE_AVATAR_COLORS.length;
   const created = createNewAthleteProfile({
     name: displayName,
+    subtitle: 'Konto Google + Firebase + Google Fit & Intervals.icu',
     avatarColor: PROFILE_AVATAR_COLORS[colorIdx],
     ftpWatts: 200,
     weightKg: 75,
     maxHrBpm: 188,
-    existingIds: Object.keys(existingProfiles),
+    existingIds: Object.keys(googleOnlyProfiles),
   });
 
   const enriched: AthleteProfile = {
@@ -203,7 +187,7 @@ export function resolveOrCreateProfileForGoogleUser(
   return {
     profile: enriched,
     updatedProfiles: {
-      ...existingProfiles,
+      ...googleOnlyProfiles,
       [enriched.id]: enriched,
     },
     isNew: true,
@@ -934,7 +918,7 @@ export async function offloadActivitiesTelemetryToOpfs(
 ): Promise<CompletedActivity[]> {
   const result: CompletedActivity[] = [];
   const fallbackProfile =
-    Object.values(profiles)[0] || DEFAULT_PROFILES.default;
+    Object.values(profiles)[0] || createFallbackRuntimeProfile();
 
   for (const act of activities) {
     const prof = profiles[act.profileId] || fallbackProfile;

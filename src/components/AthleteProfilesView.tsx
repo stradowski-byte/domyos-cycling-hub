@@ -21,7 +21,6 @@ import {
 } from '../types/cycling';
 import {
   buildHrZonesFromMax,
-  createNewAthleteProfile,
   PROFILE_AVATAR_COLORS,
 } from '../services/rampAndPhysiologyEngine';
 
@@ -30,7 +29,7 @@ interface AthleteProfilesViewProps {
   activeProfileId: ProfileId;
   onSelectProfile: (id: ProfileId) => void;
   onUpdateProfile: (id: ProfileId, updated: AthleteProfile) => void;
-  onAddProfile: (newProfile: AthleteProfile) => void;
+  onAddGoogleProfile: () => void;
   onDeleteProfile: (id: ProfileId) => void;
   isSyncingIntervals: boolean;
   onSyncFromIntervalsIcu: () => void;
@@ -43,7 +42,7 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
   activeProfileId,
   onSelectProfile,
   onUpdateProfile,
-  onAddProfile,
+  onAddGoogleProfile,
   onDeleteProfile,
   isSyncingIntervals,
   onSyncFromIntervalsIcu,
@@ -53,20 +52,7 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
   const profileList = Object.values(profiles);
   const activeProfile = profiles[activeProfileId] || profileList[0];
 
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<ProfileId | null>(null);
-
-  // New Profile Form State
-  const [newName, setNewName] = useState('');
-  const [newFtp, setNewFtp] = useState(200);
-  const [newWeight, setNewWeight] = useState(75);
-  const [newMaxHr, setNewMaxHr] = useState(188);
-  const [newColor, setNewColor] = useState(PROFILE_AVATAR_COLORS[1]);
-  const [newOfflineMode, setNewOfflineMode] = useState<OfflineTrainingMode>('all');
-  const [newIntervalsEnabled, setNewIntervalsEnabled] = useState(false);
-  const [newAthleteId, setNewAthleteId] = useState('');
-  const [newApiKey, setNewApiKey] = useState('');
-  const [newGoogleFitEnabled, setNewGoogleFitEnabled] = useState(true);
 
   const handleFieldChange = (patch: Partial<AthleteProfile>) => {
     const next: AthleteProfile = {
@@ -105,32 +91,6 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
     });
   };
 
-  const handleCreateProfileSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    const created = createNewAthleteProfile({
-      name: newName.trim(),
-      avatarColor: newColor,
-      ftpWatts: newFtp,
-      weightKg: newWeight,
-      maxHrBpm: newMaxHr,
-      offlineMode: newOfflineMode,
-      intervalsEnabled: newIntervalsEnabled,
-      athleteId: newAthleteId,
-      apiKey: newApiKey,
-      existingIds: Object.keys(profiles),
-    });
-    created.googleFit = {
-      enabled: newGoogleFitEnabled,
-      autoUploadActivities: true,
-    };
-    onAddProfile(created);
-    setNewName('');
-    setNewAthleteId('');
-    setNewApiKey('');
-    setNewIntervalsEnabled(false);
-    setIsAddModalOpen(false);
-  };
 
   const offlineModeLabel = (mode?: OfflineTrainingMode) => {
     if (mode === 'ftp_builder') return 'Budowa FTP i Interwały';
@@ -172,11 +132,11 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
               </button>
             )}
             <button
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={onAddGoogleProfile}
               className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              <span>+ Dodaj Nowy Profil</span>
+              <span>+ Zaloguj Kolejne Konto Google</span>
             </button>
           </div>
         </div>
@@ -662,211 +622,6 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
         )}
       </div>
 
-      {/* MODAL: ADD NEW ATHLETE PROFILE */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
-          <form
-            onSubmit={handleCreateProfileSubmit}
-            className="w-full max-w-lg rounded-3xl bg-[#131B26] border border-emerald-500/40 p-5 sm:p-6 space-y-4 shadow-2xl my-auto"
-          >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Plus className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base sm:text-lg font-bold text-white">
-                  Dodaj Nowy Profil Kolarza
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Nazwa profilu (np. imię lub pseudonim)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="np. Kolarz 2"
-                  className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 text-sm text-white focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Domyślny Tryb Fitness Offline
-                </label>
-                <select
-                  value={newOfflineMode}
-                  onChange={(e) =>
-                    setNewOfflineMode(e.target.value as OfflineTrainingMode)
-                  }
-                  className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 text-xs sm:text-sm text-white focus:border-emerald-500 focus:outline-none"
-                >
-                  <option value="all">
-                    Wszystkie treningi (Kompletny komputer kolarski)
-                  </option>
-                  <option value="ftp_builder">
-                    Budowa FTP, Sweet Spot & Interwały VO2Max
-                  </option>
-                  <option value="cardio_fitness">
-                    Cardio, Zdrowie & Spalanie Tlenowe (Z1–Z3)
-                  </option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    FTP (Waty)
-                  </label>
-                  <input
-                    type="number"
-                    min={60}
-                    max={550}
-                    value={newFtp}
-                    onChange={(e) =>
-                      setNewFtp(parseInt(e.target.value || '200', 10))
-                    }
-                    className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 font-mono-tabular text-sm font-bold text-emerald-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    Waga (kg)
-                  </label>
-                  <input
-                    type="number"
-                    min={35}
-                    max={160}
-                    value={newWeight}
-                    onChange={(e) =>
-                      setNewWeight(parseInt(e.target.value || '75', 10))
-                    }
-                    className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 font-mono-tabular text-sm text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    HR Max (BPM)
-                  </label>
-                  <input
-                    type="number"
-                    min={120}
-                    max={225}
-                    value={newMaxHr}
-                    onChange={(e) =>
-                      setNewMaxHr(parseInt(e.target.value || '188', 10))
-                    }
-                    className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 font-mono-tabular text-sm text-rose-400"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Kolor znacznika profilu
-                </label>
-                <div className="flex items-center gap-2.5">
-                  {PROFILE_AVATAR_COLORS.map((col) => (
-                    <button
-                      key={col}
-                      type="button"
-                      onClick={() => setNewColor(col)}
-                      className={`w-6 h-6 rounded-full transition-transform ${
-                        newColor === col
-                          ? 'scale-125 ring-2 ring-white'
-                          : 'opacity-70'
-                      }`}
-                      style={{ backgroundColor: col }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5 space-y-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newGoogleFitEnabled}
-                    onChange={(e) => setNewGoogleFitEnabled(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-500"
-                  />
-                  <span className="text-xs font-bold text-slate-200">
-                    Włącz automatyczny eksport treningów do Google Fit
-                  </span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newIntervalsEnabled}
-                    onChange={(e) => setNewIntervalsEnabled(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-500"
-                  />
-                  <span className="text-xs font-bold text-slate-200">
-                    Skonfiguruj od razu integrację z Intervals.icu (opcjonalnie)
-                  </span>
-                </label>
-
-                {newIntervalsEnabled && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">
-                        Athlete ID
-                      </label>
-                      <input
-                        type="text"
-                        value={newAthleteId}
-                        onChange={(e) => setNewAthleteId(e.target.value)}
-                        placeholder="0 lub i123456"
-                        className="w-full h-9 px-2.5 rounded-lg bg-[#131B26] border border-slate-700 font-mono-tabular text-xs text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">
-                        API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={newApiKey}
-                        onChange={(e) => setNewApiKey(e.target.value)}
-                        placeholder="Klucz API Intervals.icu"
-                        className="w-full h-9 px-2.5 rounded-lg bg-[#131B26] border border-slate-700 font-mono-tabular text-xs text-white"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="min-h-[42px] px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200"
-              >
-                Anuluj
-              </button>
-              <button
-                type="submit"
-                className="min-h-[42px] px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                Utwórz Profil
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* MODAL: CONFIRM DELETE PROFILE */}
       {confirmDeleteId && profiles[confirmDeleteId] && (

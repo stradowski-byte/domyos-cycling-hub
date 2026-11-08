@@ -1,6 +1,6 @@
 {
-  "summary":  "Zaktualizowany plan architektury: jedna centralna baza Firebase (predefiniowany JSON), obowiazkowe logowanie Google OAuth dla kazdego uzytkownika (brak logowania anonimowego), szybki przelacznik kont Google (Fast User Switcher z login_hint), synchronizacja z Firebase Firestore + Intervals.icu + Google Fit REST API oraz wdrozenie PWA przez GitHub Actions.",
-  "updatedAt":  "2026-11-08T17:39:34.732238602Z",
+  "summary":  "Plan przebudowy aplikacji pod kątem 100% bezpieczeństwa na publicznym GitHubie: usunięcie wszystkich domyślnych profili i kluczy z repozytorium, wprowadzenie obowiązkowej blokady instalacji PWA na telefonie/tablecie oraz wymuszenie konfiguracji Firebase JSON i logowania Google OAuth wyłącznie wewnątrz zainstalowanej aplikacji PWA.",
+  "updatedAt":  "2026-11-08T18:18:31.232186386Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

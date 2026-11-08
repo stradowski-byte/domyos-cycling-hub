@@ -10,35 +10,43 @@ import {
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
 export const CUSTOM_FIREBASE_CONFIG_KEY = 'domyos_custom_firebase_config';
+export const FORCE_PROD_MODE_KEY = 'domyos_force_prod_mode';
+export const AI_STUDIO_PWA_BYPASS_KEY = 'domyos_aistudio_pwa_bypass_v1';
 export const GOOGLE_OAUTH_ACCESS_TOKEN_KEY = 'domyos_google_oauth_token_v1';
 export const KNOWN_RIDERS_STORAGE_KEY = 'domyos_known_google_riders_v1';
 
 /**
- * Predefined central Firebase JSON configuration so all devices & riders connect
- * to the same shared Firebase instance out of the box, while also allowing an
- * optional custom JSON override in Settings.
+ * Checks whether the app is currently running inside the AI Studio preview or localhost
+ * development environment (as opposed to public GitHub Pages or a production domain).
  */
-export const PREDEFINED_FIREBASE_CONFIG = {
-  projectId: 'gen-lang-client-0284628641',
-  appId: '1:115395328313:web:ac4d8da36220b78755d0e8',
-  apiKey: 'AIzaSyCjpV7OXW53tnslUMwG-epM2D3tSaYWiq8',
-  authDomain: 'gen-lang-client-0284628641.firebaseapp.com',
-  firestoreDatabaseId: 'ai-studio-domyoscyclinghub-6b1f550c-9e9d-4b7d-8d84-a352595af48d',
-  storageBucket: 'gen-lang-client-0284628641.firebasestorage.app',
-  messagingSenderId: '115395328313',
-  measurementId: '',
-};
+export function isAIStudioPreviewEnvironment(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.run.app')
+  );
+}
 
-const defaultConfigs = import.meta.glob('../../firebase-applet-config.json', { eager: true });
-const rawAppletConfig =
-  (Object.values(defaultConfigs)[0] as any)?.default ||
-  Object.values(defaultConfigs)[0] ||
-  {};
+// Gatekeep 1: Never hardcode any Firebase credentials in source code.
+// Load firebase-applet-config.json ONLY in local AI Studio dev preview when not simulating production.
+// During `npm run build` (GitHub Pages), scripts/build-gh-pages.mjs overwrites firebase-applet-config.json with `{}`.
+const isLocalEnv = isAIStudioPreviewEnvironment();
+const forceProd =
+  typeof window !== 'undefined' &&
+  window.localStorage.getItem(FORCE_PROD_MODE_KEY) === 'true';
 
-const defaultConfig =
-  rawAppletConfig && rawAppletConfig.apiKey
-    ? rawAppletConfig
-    : PREDEFINED_FIREBASE_CONFIG;
+let defaultConfig: Record<string, any> = {};
+if (isLocalEnv && !forceProd) {
+  const defaultConfigs = import.meta.glob('../../firebase-applet-config.json', {
+    eager: true,
+  });
+  defaultConfig =
+    (Object.values(defaultConfigs)[0] as any)?.default ||
+    Object.values(defaultConfigs)[0] ||
+    {};
+}
 
 export function parseCustomFirebaseInput(rawInput: string) {
   let cleaned = rawInput.trim();
@@ -57,7 +65,9 @@ export function parseCustomFirebaseInput(rawInput: string) {
 
   const parsed = JSON.parse(cleaned);
   if (!parsed.apiKey || !parsed.projectId) {
-    throw new Error('Brakuje wymaganych pól (apiKey, projectId) w konfiguracji Firebase.');
+    throw new Error(
+      'Brakuje wymaganych pól (apiKey, projectId) w konfiguracji JSON Firebase.'
+    );
   }
   return parsed;
 }
@@ -88,9 +98,12 @@ export function clearCustomFirebaseConfig() {
   window.location.reload();
 }
 
-const { config: activeConfig, isCustom: isUsingCustomConfig } = getActiveFirebaseConfig();
+const { config: activeConfig, isCustom: isUsingCustomConfig } =
+  getActiveFirebaseConfig();
 
-const isConfigured = Boolean(activeConfig && activeConfig.apiKey);
+const isConfigured = Boolean(
+  activeConfig && activeConfig.apiKey && activeConfig.projectId
+);
 
 const app = isConfigured
   ? getApps().length === 0
@@ -107,14 +120,19 @@ export const auth = app && isConfigured ? getAuth(app) : (null as any);
 
 export { isUsingCustomConfig, isConfigured, activeConfig };
 
-// Connection sanity test on boot
+// Connection sanity test on boot when configured
 async function testFirestoreConnection() {
   if (!db) return;
   try {
     await getDocFromServer(doc(db, 'hubConfig', 'connection_check'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore działa obecnie w trybie offline lub czeka na połączenie.');
+    if (
+      error instanceof Error &&
+      error.message.includes('the client is offline')
+    ) {
+      console.warn(
+        'Firestore działa obecnie w trybie offline lub czeka na połączenie.'
+      );
     }
   }
 }
@@ -205,7 +223,9 @@ export async function signInRiderWithGoogle(options?: {
   hasGoogleFitScopes: boolean;
 }> {
   if (!auth) {
-    throw new Error('Brak aktywnej konfiguracji Firebase Auth.');
+    throw new Error(
+      'Najpierw wklej konfigurację JSON projektu Firebase w pamięci urządzenia.'
+    );
   }
 
   const provider = new GoogleAuthProvider();

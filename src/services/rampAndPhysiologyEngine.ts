@@ -46,11 +46,13 @@ export const PROFILE_AVATAR_COLORS = [
   '#06B6D4',
 ];
 
-export const DEFAULT_PROFILES: Record<ProfileId, AthleteProfile> = {
-  default: {
-    id: 'default',
-    name: 'Domyślny Profil',
-    subtitle: 'Tryb Offline + Integracja Intervals.icu',
+export const DEFAULT_PROFILES: Record<ProfileId, AthleteProfile> = {};
+
+export function createFallbackRuntimeProfile(): AthleteProfile {
+  return {
+    id: 'google_rider',
+    name: 'Zawodnik Google',
+    subtitle: 'Konto Google + Firebase + Google Fit & Intervals.icu',
     avatarColor: '#10B981',
     ftpWatts: 200,
     weightKg: 75,
@@ -66,8 +68,12 @@ export const DEFAULT_PROFILES: Record<ProfileId, AthleteProfile> = {
       apiKey: '',
       autoUploadActivities: true,
     },
-  },
-};
+    googleFit: {
+      enabled: true,
+      autoUploadActivities: true,
+    },
+  };
+}
 
 export function sanitizeProfileSlug(name: string, existingIds: string[] = []): ProfileId {
   const base = name
