@@ -155,21 +155,20 @@ export function resolveOrCreateProfileForGoogleUser(
     };
     return {
       profile: updated,
-      updatedProfiles: { ...googleOnlyProfiles, [updated.id]: updated },
+      updatedProfiles: { [updated.id]: updated },
       isNew: false,
     };
   }
 
-  // 2. Create a brand new profile for this authenticated Google account
-  const colorIdx = existingList.length % PROFILE_AVATAR_COLORS.length;
+  // 2. Create a brand new profile strictly for this authenticated Google account
   const created = createNewAthleteProfile({
     name: displayName,
     subtitle: 'Konto Google + Firebase + Google Fit & Intervals.icu',
-    avatarColor: PROFILE_AVATAR_COLORS[colorIdx],
+    avatarColor: PROFILE_AVATAR_COLORS[0],
     ftpWatts: 200,
     weightKg: 75,
     maxHrBpm: 188,
-    existingIds: Object.keys(googleOnlyProfiles),
+    existingIds: [],
   });
 
   const enriched: AthleteProfile = {
@@ -187,7 +186,6 @@ export function resolveOrCreateProfileForGoogleUser(
   return {
     profile: enriched,
     updatedProfiles: {
-      ...googleOnlyProfiles,
       [enriched.id]: enriched,
     },
     isNew: true,
@@ -382,10 +380,18 @@ export async function fetchAllStateFromFirestore(): Promise<{
     getDocs(collection(db, 'completedWorkouts')),
   ]);
 
+  const currentUid = auth.currentUser.uid;
+  const currentEmail = (auth.currentUser.email || '').toLowerCase();
+
   const profiles: Record<ProfileId, AthleteProfile> = {};
   profSnap.forEach((d) => {
     const data = d.data() as AthleteProfile;
-    if (data && data.id) {
+    if (
+      data &&
+      data.id &&
+      (data.uid === currentUid ||
+        (currentEmail && data.email?.toLowerCase() === currentEmail))
+    ) {
       profiles[data.id] = data;
     }
   });
@@ -416,7 +422,7 @@ export async function fetchAllStateFromFirestore(): Promise<{
 
 /**
  * Subscribes to real-time `onSnapshot` updates from the central Firebase Firestore
- * database for profiles, planned workouts, completed workouts, and known riders.
+ * database for the active Google user's profile, planned workouts, completed workouts, and known riders.
  */
 export function subscribeToFirestoreHub(callbacks: {
   onProfilesSnapshot: (profiles: Record<ProfileId, AthleteProfile>) => void;
@@ -427,6 +433,9 @@ export function subscribeToFirestoreHub(callbacks: {
   if (!db || !auth?.currentUser) {
     return () => {};
   }
+
+  const currentUid = auth.currentUser.uid;
+  const currentEmail = (auth.currentUser.email || '').toLowerCase();
 
   const unsubHub = onSnapshot(
     doc(db, 'hubConfig', 'default'),
@@ -449,7 +458,12 @@ export function subscribeToFirestoreHub(callbacks: {
       const map: Record<ProfileId, AthleteProfile> = {};
       snap.forEach((d) => {
         const prof = d.data() as AthleteProfile;
-        if (prof && prof.id) {
+        if (
+          prof &&
+          prof.id &&
+          (prof.uid === currentUid ||
+            (currentEmail && prof.email?.toLowerCase() === currentEmail))
+        ) {
           map[prof.id] = prof;
         }
       });

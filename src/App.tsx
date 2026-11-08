@@ -52,7 +52,6 @@ import {
 } from './lib/firebase';
 import {
   deletePlannedWorkoutFromFirestore,
-  deleteProfileFromFirestore,
   deleteWorkoutTxtFromLocalOpfs,
   ensureActivityHasRecords,
   fetchAllStateFromFirestore,
@@ -87,10 +86,10 @@ import { ProfilesAndCloudSettingsView } from './components/ProfilesAndCloudSetti
 import { FastUserSwitcherModal } from './components/FastUserSwitcherModal';
 import { PwaAndAuthGateScreen } from './components/PwaAndAuthGateScreen';
 
-const LS_PROFILES_KEY = 'domyos_hub_profiles_v1';
+const LS_PROFILES_KEY = 'domyos_hub_google_profile_v2';
 const LS_WORKOUTS_KEY = 'domyos_hub_workouts_v1';
 const LS_ACTIVITIES_KEY = 'domyos_hub_activities_v1';
-const LS_ACTIVE_PROFILE_KEY = 'domyos_hub_active_profile_v1';
+const LS_ACTIVE_PROFILE_KEY = 'domyos_hub_active_profile_v2';
 const LS_THEME_MODE_KEY = 'domyos_hub_theme_v1';
 
 type ActiveTab = 'cockpit' | 'workouts' | 'analytics' | 'profiles' | 'settings';
@@ -121,14 +120,18 @@ export default function App() {
     }
   }, [themeMode]);
 
-  // Dynamic Google-Authenticated Multi-User Profiles State (Zero pre-created or default profiles)
+  // Single Active Google Account Profile State (Purges legacy multi-profile cache)
   const [profiles, setProfiles] = useState<Record<ProfileId, AthleteProfile>>(() => {
     try {
+      localStorage.removeItem('domyos_hub_profiles_v1');
+      localStorage.removeItem('domyos_hub_active_profile_v1');
       const saved = localStorage.getItem(LS_PROFILES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          return filterGoogleAuthenticatedProfiles(parsed);
+          const valid = filterGoogleAuthenticatedProfiles(parsed);
+          const firstKey = Object.keys(valid)[0];
+          return firstKey ? { [firstKey]: valid[firstKey] } : {};
         }
       }
     } catch {
@@ -357,15 +360,16 @@ export default function App() {
         saveProfileToFirestore(resolvedProf).catch(() => {});
         setKnownRiders(getKnownGoogleRiders());
 
-        // Start real-time Firestore listeners for shared household database
+        // Start real-time Firestore listeners for active Google account
         unsubFirestore = subscribeToFirestoreHub({
           onProfilesSnapshot: (cloudProfiles) => {
             const validCloudProfiles =
               filterGoogleAuthenticatedProfiles(cloudProfiles);
-            setProfiles((prev) => ({
-              ...filterGoogleAuthenticatedProfiles(prev),
-              ...validCloudProfiles,
-            }));
+            const firstCloud = Object.values(validCloudProfiles)[0];
+            if (firstCloud) {
+              setProfiles({ [firstCloud.id]: firstCloud });
+              setActiveProfileId(firstCloud.id);
+            }
           },
           onWorkoutsSnapshot: (cloudWorkouts) => {
             setWorkouts((prev) => {
@@ -849,27 +853,9 @@ export default function App() {
   const handleGoogleLogout = async () => {
     await signOutGoogleRider();
     setGoogleUser(null);
+    setProfiles({});
+    setActiveProfileId('');
     showToast('Wylogowano z konta Google.');
-  };
-
-  const handleDeleteProfile = (idToRemove: ProfileId) => {
-    const ids = Object.keys(profiles);
-    if (ids.length <= 1) {
-      showToast('W aplikacji musi pozostać przynajmniej jeden profil.');
-      return;
-    }
-    const removedName = profiles[idToRemove]?.name || idToRemove;
-    const remainingIds = ids.filter((k) => k !== idToRemove);
-    setProfiles((prev) => {
-      const copy = { ...prev };
-      delete copy[idToRemove];
-      return copy;
-    });
-    deleteProfileFromFirestore(idToRemove).catch(() => {});
-    if (activeProfile.id === idToRemove && remainingIds.length > 0) {
-      setActiveProfileId(remainingIds[0]);
-    }
-    showToast(`Usunięto profil „${removedName}”.`);
   };
 
   // Firebase Cloud Firestore Sync Handlers
@@ -1778,17 +1764,11 @@ export default function App() {
 
         {activeTab === 'profiles' && (
           <AthleteProfilesView
-            profiles={profiles}
-            activeProfileId={activeProfile.id}
-            onSelectProfile={(id) => setActiveProfileId(id)}
+            activeProfile={activeProfile}
             onUpdateProfile={(id, updated) => {
-              setProfiles((prev) => ({ ...prev, [id]: updated }));
+              setProfiles({ [id]: updated });
               saveProfileToFirestore(updated).catch(() => {});
             }}
-            onAddGoogleProfile={() => {
-              handleAddNewGoogleRider().catch(() => {});
-            }}
-            onDeleteProfile={handleDeleteProfile}
             isSyncingIntervals={isSyncingIntervals}
             onSyncFromIntervalsIcu={handleSyncFromIntervalsIcu}
             onOpenFastUserSwitcher={() => setIsFastSwitcherOpen(true)}

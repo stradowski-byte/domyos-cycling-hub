@@ -46,7 +46,6 @@ interface WorkoutsAndRampBuilderViewProps {
 
 export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProps> = ({
   activeProfile,
-  profiles,
   workouts,
   selectedWorkoutId,
   isSyncingIntervals,
@@ -57,7 +56,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
   onSyncFromIntervalsIcu,
   onSyncTxtWorkoutsFolder,
 }) => {
-  const [filterScope, setFilterScope] = useState<'profile' | 'all' | 'intervals'>('profile');
+  const [filterScope, setFilterScope] = useState<'all' | 'intervals' | 'custom'>('all');
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const txtFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -67,7 +66,6 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
   const [description, setDescription] = useState(
     'Trening kolarski dla Domyos Challenge Bike.'
   );
-  const [targetProfile, setTargetProfile] = useState<ProfileId | 'shared'>(activeProfile.id);
   const [scheduledDate, setScheduledDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -116,26 +114,22 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
     if (filterScope === 'intervals') {
       return w.source === 'intervals_calendar' || w.source === 'intervals_library';
     }
-    if (filterScope === 'profile') {
-      const belongsToProfile = w.profileId === activeProfile.id || w.profileId === 'shared';
-      if (!belongsToProfile) return false;
-      // If workout is explicitly assigned to this profile, always show it;
-      // for shared default workouts, filter if user selected a specific offline focus mode
-      if (w.profileId === 'shared' && activeProfile.offlineMode === 'ftp_builder') {
-        return w.category !== 'Recovery';
-      }
-      if (w.profileId === 'shared' && activeProfile.offlineMode === 'cardio_fitness') {
-        return w.category === 'Endurance' || w.category === 'Recovery' || w.category === 'Custom';
-      }
-      return true;
+    if (filterScope === 'custom') {
+      return w.category === 'Custom' || w.id.startsWith('w_custom_') || w.id.startsWith('w_txt_');
+    }
+    // In 'all' mode, apply the user's optional focus mode filter if configured
+    if (activeProfile.offlineMode === 'ftp_builder') {
+      return w.category !== 'Recovery';
+    }
+    if (activeProfile.offlineMode === 'cardio_fitness') {
+      return w.category === 'Endurance' || w.category === 'Recovery' || w.category === 'Custom';
     }
     return true;
   });
 
   const openNewBuilder = () => {
     setEditId(null);
-    setTitle(`Trening (${activeProfile.name.split(' ')[0]})`);
-    setTargetProfile(activeProfile.id);
+    setTitle('Nowy Trening Własny');
     setScheduledDate(new Date().toISOString().slice(0, 10));
     setIsBuilderOpen(true);
   };
@@ -144,7 +138,6 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
     setEditId(w.id);
     setTitle(w.name);
     setDescription(w.description);
-    setTargetProfile(w.profileId);
     setScheduledDate(w.scheduledDate || new Date().toISOString().slice(0, 10));
     setBlocks(w.blocks.map((b) => ({ ...b })));
     setIntervalsTextInput(formatBlocksToIntervalsText(w.blocks));
@@ -240,7 +233,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
   const handleSaveBuiltWorkout = (startAfterSave: boolean) => {
     const newWorkout: StructuredWorkout = {
       id: editId || `w_custom_${Date.now()}`,
-      profileId: targetProfile,
+      profileId: 'shared',
       name: title.trim() || 'Trening Własny',
       description: description.trim(),
       category: 'Custom',
@@ -263,7 +256,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
       const file = fileList[i];
       try {
         const text = await file.text();
-        const parsedWorkout = parseIcuTextFileToWorkout(text, file.name, activeProfile.id);
+        const parsedWorkout = parseIcuTextFileToWorkout(text, file.name, 'shared');
         onSaveWorkout(parsedWorkout);
       } catch (err) {
         console.warn('Nie udało się wczytać pliku .txt:', file.name, err);
@@ -274,22 +267,21 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
 
   return (
     <div className="space-y-5 pb-8 min-w-0 max-w-full overflow-x-hidden">
-      {/* Top Toolbar: Filter Tabs + Intervals.icu Sync + .TXT Folder Sync + Offline Ramp Creator Trigger */}
+      {/* Top Toolbar: Filter Tabs + Intervals.icu Sync + .TXT Import + Workout Creator Trigger */}
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 space-y-3 min-w-0 overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 min-w-0">
-          {/* 3-Segment Filter Bar: 3 equal columns on mobile so 'Intervals.icu' never overflows screen */}
+          {/* 3-Segment Filter Bar without any profile split */}
           <div className="grid grid-cols-3 sm:flex items-center gap-1 p-1 bg-[#0B0F17] rounded-xl border border-slate-800 w-full lg:w-auto min-w-0">
             <button
-              onClick={() => setFilterScope('profile')}
+              onClick={() => setFilterScope('all')}
               className={`min-h-[38px] px-2 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center min-w-0 ${
-                filterScope === 'profile'
+                filterScope === 'all'
                   ? 'bg-emerald-500 text-slate-950 font-bold'
                   : 'text-slate-300 hover:text-white'
               }`}
-              title={`Plan dla: ${activeProfile.name}`}
+              title={`Wszystkie treningi (${workouts.length})`}
             >
-              <span className="sm:hidden">Plan: {activeProfile.name}</span>
-              <span className="hidden sm:inline">Plan dla: {activeProfile.name}</span>
+              Wszystkie ({workouts.length})
             </button>
             <button
               onClick={() => setFilterScope('intervals')}
@@ -300,19 +292,19 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
               }`}
               title="Z biblioteki Intervals.icu"
             >
-              <span className="sm:hidden">Z bibl. ICU</span>
+              <span className="sm:hidden">Intervals.icu</span>
               <span className="hidden sm:inline">Z biblioteki Intervals.icu</span>
             </button>
             <button
-              onClick={() => setFilterScope('all')}
+              onClick={() => setFilterScope('custom')}
               className={`min-h-[38px] px-2 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center min-w-0 ${
-                filterScope === 'all'
+                filterScope === 'custom'
                   ? 'bg-emerald-500 text-slate-950 font-bold'
                   : 'text-slate-300 hover:text-white'
               }`}
-              title={`Wszystkie (${workouts.length})`}
+              title="Własne treningi i zaimportowane pliki .TXT"
             >
-              Wszystkie ({workouts.length})
+              Własne / .TXT
             </button>
           </div>
 
@@ -329,10 +321,10 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
             <button
               onClick={() => txtFileInputRef.current?.click()}
               className="min-h-[42px] px-2.5 sm:px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors min-w-0 truncate"
-              title="Wczytaj pojedyncze lub wiele plików tekstowych .txt do folderu aktywnego profilu"
+              title="Wczytaj pojedyncze lub wiele plików tekstowych .txt"
             >
               <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="truncate">Wczytaj .TXT (/{activeProfile.id})</span>
+              <span className="truncate">Wczytaj .TXT</span>
             </button>
 
             {onSyncTxtWorkoutsFolder && (
@@ -340,7 +332,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 onClick={onSyncTxtWorkoutsFolder}
                 disabled={isSyncingDriveTxt}
                 className="min-h-[42px] px-2.5 sm:px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors min-w-0 truncate"
-                title="Synchronizuj treningi z centralną bazą Firebase Firestore i pamięcią OPFS"
+                title="Synchronizuj treningi z bazą Firebase Firestore i pamięcią OPFS"
               >
                 <FolderSync className={`w-3.5 h-3.5 shrink-0 ${isSyncingDriveTxt ? 'animate-spin' : ''}`} />
                 <span className="truncate">Sync Firebase</span>
@@ -368,12 +360,11 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
 
         <div className="rounded-xl bg-[#0B0F17] border border-slate-800/90 px-3 py-2 text-[11px] text-slate-400 leading-relaxed break-words min-w-0 flex flex-wrap items-center justify-between gap-2">
           <span>
-            Treningi <code className="text-slate-300">.txt</code> zapisują się w podkatalogu aktywnego profilu:{' '}
-            <code className="text-emerald-400 break-all">/Workouts_Library/{activeProfile.id}/</code> oraz wspólnym{' '}
-            <code className="text-amber-400 break-all">/Workouts_Library/shared/</code>.
+            Wszystkie treningi są automatycznie przeliczane względem Twojego aktualnego progu{' '}
+            <strong className="text-emerald-400">FTP ({activeProfile.ftpWatts} W)</strong> oraz synchronizowane z Firebase i pamięcią OPFS.
           </span>
           <span className="text-slate-300 font-semibold">
-            Tryb profilu:{' '}
+            Fokus treningowy:{' '}
             <span className="text-emerald-400">
               {activeProfile.offlineMode === 'ftp_builder'
                 ? 'Budowa FTP & Interwały'
@@ -385,7 +376,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
         </div>
       </div>
 
-      {/* OFFLINE VISUAL WORKOUT CREATOR */}
+      {/* VISUAL WORKOUT CREATOR */}
       {isBuilderOpen && (
         <div className="rounded-2xl bg-[#131B26] border border-emerald-500/40 p-3.5 sm:p-5 space-y-4 min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
@@ -394,7 +385,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 Kreator Treningu
               </h2>
               <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                Układaj bloki o stałej mocy, bloki ze zmienną mocą (ramp) lub odcinki oporowe. Waty są automatycznie przeliczane względem FTP profilu ({activeProfile.ftpWatts} W).
+                Układaj bloki o stałej mocy, bloki ze zmienną mocą (ramp) lub odcinki oporowe. Waty są automatycznie przeliczane względem Twojego FTP ({activeProfile.ftpWatts} W).
               </p>
             </div>
             <button
@@ -406,7 +397,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <div className="min-w-0">
               <label className="block text-xs text-slate-400 mb-1">Nazwa treningu</label>
               <input
@@ -415,28 +406,6 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 text-sm text-white focus:border-emerald-500 focus:outline-none"
               />
-            </div>
-
-            <div className="min-w-0">
-              <label className="block text-xs text-slate-400 mb-1">Przypisz do profilu</label>
-              <select
-                value={targetProfile}
-                onChange={(e) => setTargetProfile(e.target.value as ProfileId | 'shared')}
-                className="w-full h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 text-sm text-white focus:border-emerald-500 focus:outline-none"
-              >
-                {profiles
-                  ? Object.values(profiles).map((prof) => (
-                      <option key={prof.id} value={prof.id}>
-                        {prof.name} (/{prof.id} · FTP {prof.ftpWatts}W)
-                      </option>
-                    ))
-                  : (
-                    <option value={activeProfile.id}>
-                      {activeProfile.name} (/{activeProfile.id})
-                    </option>
-                  )}
-                <option value="shared">Wspólny dla wszystkich profili (/shared)</option>
-              </select>
             </div>
 
             <div className="min-w-0">
@@ -476,7 +445,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
           {/* Live Preview of the Built Ramp & Interval Chart */}
           <div className="space-y-1.5 min-w-0">
             <div className="text-[11px] sm:text-xs text-slate-400">
-              PODGLĄD KRZYWEJ MOCY I RAMP DLA PROFILU {activeProfile.name.toUpperCase()} (FTP {activeProfile.ftpWatts}W):
+              PODGLĄD KRZYWEJ MOCY I RAMP (FTP {activeProfile.ftpWatts}W):
             </div>
             <WorkoutProfileChart
               blocks={blocks}
@@ -680,17 +649,11 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
               }`}
             >
               <div className="space-y-2 min-w-0">
-                {/* Clean wrapped metadata row so text never overflows card width on 360px screens */}
+                {/* Clean metadata row without any profile IDs or profile names */}
                 <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] sm:text-xs text-slate-400 min-w-0">
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 min-w-0">
-                    <span className="font-semibold text-emerald-400 font-mono-tabular truncate max-w-[180px] sm:max-w-none">
-                      /{w.profileId}
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span>
-                      {w.profileId === 'shared'
-                        ? 'Wspólny'
-                        : profiles?.[w.profileId]?.name || w.profileId}
+                    <span className="font-semibold text-emerald-400">
+                      {w.category}
                     </span>
                     <span aria-hidden="true">·</span>
                     <span className="font-mono-tabular">{formatDurationClock(totalSec)}</span>
@@ -719,7 +682,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 height={110}
               />
 
-              {/* Compact Wrapped Workout Blocks Preview (never overflows container) */}
+              {/* Compact Wrapped Workout Blocks Preview */}
               <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 {w.blocks.slice(0, 5).map((blk) => {
                   const sW = calculateBlockInstantTarget(blk, 0, activeProfile.ftpWatts).targetWatts;
@@ -750,7 +713,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 )}
               </div>
 
-              {/* Card Actions: Secondary row + Full-width CTA on mobile */}
+              {/* Card Actions */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80 min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <button

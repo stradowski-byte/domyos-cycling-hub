@@ -228,12 +228,12 @@ export const ProfilesAndCloudSettingsView: React.FC<
     });
   };
 
-  const handleCreateNewOpfsTxt = (owner: ProfileId | 'shared') => {
+  const handleCreateNewOpfsTxt = () => {
     setEditingTxtModal({
       isOpen: true,
-      ownerFolder: owner,
+      ownerFolder: 'shared',
       fileName: 'Nowy_Trening_Interwalowy.txt',
-      content: `# Name: Nowy Trening (${owner})\n# Category: Custom\n# Description: Trening w katalogu /Workouts_Library/${owner}\n\n- 8m ramp 48-75% 88rpm\n4x\n- 3m 95% 92rpm\n- 2m 55% 85rpm\n- 5m ramp 65-42% 80rpm\n`,
+      content: `# Name: Nowy Trening Własny\n# Category: Custom\n# Description: Trening w bibliotece lokalnej OPFS\n\n- 8m ramp 48-75% 88rpm\n4x\n- 3m 95% 92rpm\n- 2m 55% 85rpm\n- 5m ramp 65-42% 80rpm\n`,
       isNew: true,
     });
   };
@@ -251,13 +251,13 @@ export const ProfilesAndCloudSettingsView: React.FC<
     setEditingTxtModal(null);
     await refreshOpfsFileList();
     onNotifyToast?.(
-      `Zapisano plik ${editingTxtModal.fileName} w folderze /Workouts_Library/${editingTxtModal.ownerFolder} oraz w Firebase!`
+      `Zapisano plik ${editingTxtModal.fileName} w lokalnej bibliotece OPFS oraz w Firebase!`
     );
   };
 
   const filteredOpfsFiles = opfsFiles.filter((f) => {
     if (opfsFilter === 'all') return true;
-    return f.ownerFolder === opfsFilter;
+    return f.kind === opfsFilter;
   });
 
   return (
@@ -690,24 +690,17 @@ export const ProfilesAndCloudSettingsView: React.FC<
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto min-w-0">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto min-w-0">
             <button
-              onClick={() => handleCreateNewOpfsTxt(activeProfileId)}
-              className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 truncate"
+              onClick={() => handleCreateNewOpfsTxt()}
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 truncate"
             >
               <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">+ .TXT /{activeProfileId}</span>
-            </button>
-            <button
-              onClick={() => handleCreateNewOpfsTxt('shared')}
-              className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-400 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 truncate"
-            >
-              <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">+ .TXT /shared</span>
+              <span className="truncate">+ Nowy Plik .TXT</span>
             </button>
             <button
               onClick={refreshOpfsFileList}
-              className="col-span-2 sm:col-span-1 min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs font-semibold text-slate-200 flex items-center justify-center gap-1 truncate"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs font-semibold text-slate-200 flex items-center justify-center gap-1 truncate"
             >
               <RefreshCw
                 className={`w-3.5 h-3.5 shrink-0 ${
@@ -719,9 +712,9 @@ export const ProfilesAndCloudSettingsView: React.FC<
           </div>
         </div>
 
-        {/* Filter Tabs by Dynamic Profile Folder */}
+        {/* Filter Tabs by File Type */}
         <div className="flex flex-wrap items-center justify-between gap-3 min-w-0">
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1 p-1 rounded-xl bg-[#0B0F17] border border-slate-800 w-full sm:w-auto min-w-0">
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-1 p-1 rounded-xl bg-[#0B0F17] border border-slate-800 w-full sm:w-auto min-w-0">
             <button
               onClick={() => setOpfsFilter('all')}
               className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center ${
@@ -732,30 +725,25 @@ export const ProfilesAndCloudSettingsView: React.FC<
             >
               Wszystkie ({opfsFiles.length})
             </button>
-            {Object.values(profiles).map((prof) => (
-              <button
-                key={prof.id}
-                onClick={() => setOpfsFilter(prof.id)}
-                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center ${
-                  opfsFilter === prof.id
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
-                    : 'text-slate-300'
-                }`}
-              >
-                /{prof.id} (
-                {opfsFiles.filter((f) => f.ownerFolder === prof.id).length})
-              </button>
-            ))}
             <button
-              onClick={() => setOpfsFilter('shared')}
+              onClick={() => setOpfsFilter('txt')}
               className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center ${
-                opfsFilter === 'shared'
+                opfsFilter === 'txt'
                   ? 'bg-emerald-500 text-slate-950 font-bold'
                   : 'text-slate-300'
               }`}
             >
-              /shared (
-              {opfsFiles.filter((f) => f.ownerFolder === 'shared').length})
+              Treningi .TXT ({opfsFiles.filter((f) => f.kind === 'txt').length})
+            </button>
+            <button
+              onClick={() => setOpfsFilter('fit')}
+              className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors truncate text-center ${
+                opfsFilter === 'fit'
+                  ? 'bg-emerald-500 text-slate-950 font-bold'
+                  : 'text-slate-300'
+              }`}
+            >
+              Pliki .FIT ({opfsFiles.filter((f) => f.kind === 'fit').length})
             </button>
           </div>
         </div>

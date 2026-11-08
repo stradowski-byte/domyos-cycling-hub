@@ -1,18 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  Users,
   Heart,
   Zap,
   Link2,
   RefreshCw,
   CheckCircle2,
-  Plus,
-  Trash2,
   Dumbbell,
   Edit3,
   Activity,
   Cloud,
-  X,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   AthleteProfile,
@@ -25,12 +22,8 @@ import {
 } from '../services/rampAndPhysiologyEngine';
 
 interface AthleteProfilesViewProps {
-  profiles: Record<ProfileId, AthleteProfile>;
-  activeProfileId: ProfileId;
-  onSelectProfile: (id: ProfileId) => void;
+  activeProfile: AthleteProfile;
   onUpdateProfile: (id: ProfileId, updated: AthleteProfile) => void;
-  onAddGoogleProfile: () => void;
-  onDeleteProfile: (id: ProfileId) => void;
   isSyncingIntervals: boolean;
   onSyncFromIntervalsIcu: () => void;
   onOpenFastUserSwitcher?: () => void;
@@ -38,22 +31,13 @@ interface AthleteProfilesViewProps {
 }
 
 export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
-  profiles,
-  activeProfileId,
-  onSelectProfile,
+  activeProfile,
   onUpdateProfile,
-  onAddGoogleProfile,
-  onDeleteProfile,
   isSyncingIntervals,
   onSyncFromIntervalsIcu,
   onOpenFastUserSwitcher,
   onRefreshGoogleFitToken,
 }) => {
-  const profileList = Object.values(profiles);
-  const activeProfile = profiles[activeProfileId] || profileList[0];
-
-  const [confirmDeleteId, setConfirmDeleteId] = useState<ProfileId | null>(null);
-
   const handleFieldChange = (patch: Partial<AthleteProfile>) => {
     const next: AthleteProfile = {
       ...activeProfile,
@@ -91,7 +75,6 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
     });
   };
 
-
   const offlineModeLabel = (mode?: OfflineTrainingMode) => {
     if (mode === 'ftp_builder') return 'Budowa FTP i Interwały';
     if (mode === 'cardio_fitness') return 'Cardio, Zdrowie i Spalanie';
@@ -102,146 +85,58 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
 
   return (
     <div className="space-y-5 pb-8 min-w-0 max-w-full overflow-x-hidden">
-      {/* 1. DYNAMIC MULTI-PROFILE BAR + FAST USER SWITCHER + ADD PROFILE BUTTON */}
+      {/* 1. CURRENT AUTHENTICATED GOOGLE ACCOUNT HEADER (NO MULTI-PROFILE LIST) */}
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 min-w-0">
-          <div className="space-y-1 min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <Users className="w-5 h-5 text-emerald-400 shrink-0" />
-              <span className="truncate">
-                Profile Zawodników (Firebase + Google Fit + Intervals.icu)
-              </span>
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Wszystkie profile zapisują swoje treningi do jednej wspólnej bazy{' '}
-              <strong className="text-emerald-400">Firebase Cloud Firestore</strong>.
-              Każda osoba loguje się własnym kontem Google, aby wysyłać dane na
-              swoje konto <strong className="text-rose-400">Google Fit</strong> lub{' '}
-              <strong className="text-sky-400">Intervals.icu</strong>.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {onOpenFastUserSwitcher && (
-              <button
-                onClick={onOpenFastUserSwitcher}
-                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <RefreshCw className="w-4 h-4 shrink-0" />
-                <span>Przełącz Konto Google</span>
-              </button>
-            )}
-            <button
-              onClick={onAddGoogleProfile}
-              className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4 shrink-0" />
-              <span>+ Zaloguj Kolejne Konto Google</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Dynamic Profile Selector Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-          {profileList.map((p) => {
-            const isSelected = p.id === activeProfile.id;
-            return (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 border-b border-slate-800 pb-4 min-w-0">
+          <div className="flex items-center gap-3.5 min-w-0">
+            {activeProfile.photoURL ? (
+              <img
+                src={activeProfile.photoURL}
+                alt={activeProfile.name}
+                className="w-12 h-12 rounded-full border-2 shrink-0"
+                style={{ borderColor: activeProfile.avatarColor || '#10B981' }}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
               <div
-                key={p.id}
-                onClick={() => onSelectProfile(p.id)}
-                className={`cursor-pointer rounded-xl p-3 border transition-all flex items-center justify-between gap-2.5 min-w-0 ${
-                  isSelected
-                    ? 'bg-emerald-500/15 border-emerald-500 text-white shadow-sm'
-                    : 'bg-[#0B0F17] border-slate-800 hover:border-slate-700 text-slate-300'
-                }`}
+                className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-base text-slate-950 shrink-0"
+                style={{ backgroundColor: activeProfile.avatarColor || '#10B981' }}
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {p.photoURL ? (
-                    <img
-                      src={p.photoURL}
-                      alt={p.name}
-                      className="w-8 h-8 rounded-full border shrink-0"
-                      style={{ borderColor: p.avatarColor || '#10B981' }}
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span
-                      className="w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-white/10"
-                      style={{ backgroundColor: p.avatarColor || '#10B981' }}
-                    />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-xs sm:text-sm font-bold text-white truncate">
-                      {p.name}
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono-tabular truncate">
-                      {p.email ? `${p.email} · ` : `/${p.id} · `}FTP {p.ftpWatts}W ·{' '}
-                      {p.weightKg}kg
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[10px] font-bold text-emerald-300">
-                    FB
-                  </span>
-                  {p.googleFit?.enabled !== false && (
-                    <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-[10px] font-bold text-rose-300">
-                      GFit
-                    </span>
-                  )}
-                  {p.intervals.enabled && p.intervals.apiKey.trim() && (
-                    <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-[10px] font-bold text-sky-300">
-                      ICU
-                    </span>
-                  )}
-                  {profileList.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmDeleteId(p.id);
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      title={`Usuń profil ${p.name}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                {activeProfile.name.slice(0, 2).toUpperCase()}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base sm:text-lg font-bold text-white truncate">
+                  {activeProfile.name}
+                </h2>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-[10px] font-bold text-emerald-300 flex items-center gap-1 shrink-0">
+                  <ShieldCheck className="w-3 h-3" />
+                  Aktywne Konto Google
+                </span>
+              </div>
+              <div className="text-xs text-slate-400 font-mono-tabular truncate">
+                {activeProfile.email || 'Konto Google OAuth'} · FTP {activeProfile.ftpWatts}W · {activeProfile.weightKg}kg
+              </div>
+            </div>
+          </div>
 
-      {/* 2. ACTIVE PROFILE IDENTITY & OFFLINE FITNESS MODE */}
-      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <Edit3 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <h3 className="text-sm sm:text-base font-bold text-white truncate">
-              Konfiguracja Profilu i Konta Google — {activeProfile.name}
-            </h3>
-          </div>
-          <div className="flex items-center gap-3 text-[11px] font-mono-tabular text-slate-400">
-            <span>
-              Konto Google:{' '}
-              <strong className="text-emerald-400">
-                {activeProfile.email || 'Nieprzypisane'}
-              </strong>
-            </span>
-            <span>·</span>
-            <span>
-              OPFS: <strong className="text-emerald-400">/{activeProfile.id}</strong>
-            </span>
-          </div>
+          {onOpenFastUserSwitcher && (
+            <button
+              onClick={onOpenFastUserSwitcher}
+              className="min-h-[42px] px-4 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shrink-0"
+            >
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span>Przeloguj Konto Google</span>
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
           <div className="md:col-span-4 min-w-0">
-            <label className="block text-xs text-slate-400 mb-1">
-              Nazwa wyświetlana profilu
+            <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1.5">
+              <Edit3 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Nazwa wyświetlana</span>
             </label>
             <input
               type="text"
@@ -254,7 +149,7 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
           <div className="md:col-span-5 min-w-0">
             <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1.5">
               <Dumbbell className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Tryb Fitness Offline (Fokus treningowy profilu)</span>
+              <span>Fokus treningowy (filtrowanie biblioteki)</span>
             </label>
             <select
               value={activeProfile.offlineMode || 'all'}
@@ -280,7 +175,7 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
           </div>
 
           <div className="md:col-span-3 min-w-0">
-            <label className="block text-xs text-slate-400 mb-1">Kolor profilu</label>
+            <label className="block text-xs text-slate-400 mb-1">Kolor akcentu</label>
             <div className="flex items-center gap-2 h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-800">
               {PROFILE_AVATAR_COLORS.map((col) => (
                 <button
@@ -301,13 +196,13 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
         </div>
       </div>
 
-      {/* 3. PHYSIOLOGY: FTP, WEIGHT, HR PARAMETERS & AUTOMATIC ZONES */}
+      {/* 2. PHYSIOLOGY: FTP, WEIGHT, HR PARAMETERS & AUTOMATIC ZONES */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div className="lg:col-span-5 rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-base font-bold text-white">
-                Parametry Fizjologiczne — {activeProfile.name}
+                Parametry Fizjologiczne
               </h3>
               <p className="text-xs text-slate-400">
                 Wartości bazowe do przeliczania watów i stref tętna podczas jazdy
@@ -473,19 +368,18 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
         </div>
       </div>
 
-      {/* 4. GOOGLE FIT + FIREBASE CLOUD INTEGRATION */}
+      {/* 3. GOOGLE FIT + FIREBASE CLOUD INTEGRATION */}
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="space-y-1">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Activity className="w-4 h-4 text-rose-400" />
-              Integracja z Google Fit & Centralnym Firebase — {activeProfile.name}
+              Integracja z Google Fit & Firebase Firestore
             </h3>
             <p className="text-xs text-slate-400">
-              Po zalogowaniu własnym kontem Google każdy zakończony trening jest
-              zapisywany w centralnej bazie{' '}
+              Każdy zakończony trening jest zapisywany w Twojej bazie{' '}
               <strong className="text-emerald-400">Firebase Firestore</strong> oraz
-              automatycznie wysyłany do osobistego konta{' '}
+              automatycznie wysyłany do połączonego konta{' '}
               <strong className="text-rose-400">Google Fit</strong> (moc, tętno,
               kalorie, sesja stacjonarna).
             </p>
@@ -512,9 +406,9 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
           <div className="flex items-center gap-2.5 text-slate-300">
             <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              Konto Google powiązane z profilem:{' '}
+              Konto Google:{' '}
               <strong className="text-white">
-                {activeProfile.email || 'Zaloguj konto Google w przełączniku'}
+                {activeProfile.email || 'Połączone'}
               </strong>
             </span>
           </div>
@@ -530,18 +424,17 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
         </div>
       </div>
 
-      {/* 5. INTERVALS.ICU INTEGRATION (AVAILABLE FOR EVERY PROFILE) */}
+      {/* 4. INTERVALS.ICU INTEGRATION */}
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="space-y-1">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Link2 className="w-4 h-4 text-sky-400" />
-              Integracja z Intervals.icu — {activeProfile.name}
+              Integracja z Intervals.icu
             </h3>
             <p className="text-xs text-slate-400">
-              Każdy profil może niezależnie synchronizować kalendarz treningów,
-              wykresy Fitness (CTL/ATL/TSB) i pliki .FIT z własnym kontem
-              Intervals.icu.
+              Synchronizuj kalendarz treningów, wykresy Fitness (CTL/ATL/TSB) i
+              pliki .FIT z kontem Intervals.icu przypisanym do tego konta Google.
             </p>
           </div>
 
@@ -613,48 +506,14 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
           <div className="rounded-xl bg-[#0B0F17] border border-slate-800/80 p-3.5 flex items-center gap-2.5 text-xs text-slate-300">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              Profil <strong>{activeProfile.name}</strong> synchronizuje wszystkie
-              treningi z centralnym <strong>Firebase Firestore</strong>, opcjonalnie
-              eksportuje jazdy do <strong>Google Fit</strong> oraz zapisuje pliki{' '}
-              <code>.FIT</code> w lokalnym katalogu OPFS.
+              Konto <strong>{activeProfile.email || activeProfile.name}</strong>{' '}
+              synchronizuje wszystkie treningi z <strong>Firebase Firestore</strong>,
+              opcjonalnie eksportuje jazdy do <strong>Google Fit</strong> oraz
+              zapisuje pliki <code>.FIT</code> w lokalnym katalogu OPFS.
             </span>
           </div>
         )}
       </div>
-
-
-      {/* MODAL: CONFIRM DELETE PROFILE */}
-      {confirmDeleteId && profiles[confirmDeleteId] && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl bg-[#131B26] border border-rose-500/40 p-5 space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold text-white">
-              Usunąć profil „{profiles[confirmDeleteId].name}”?
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Profil zostanie usunięty z listy aktywnych profili w aplikacji.
-              Zapisane wcześniej pliki <code>.FIT</code> pozostaną bezpieczne.
-            </p>
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                onClick={() => setConfirmDeleteId(null)}
-                className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200"
-              >
-                Anuluj
-              </button>
-              <button
-                onClick={() => {
-                  const idToRemove = confirmDeleteId;
-                  setConfirmDeleteId(null);
-                  onDeleteProfile(idToRemove);
-                }}
-                className="min-h-[40px] px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs"
-              >
-                Usuń profil
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

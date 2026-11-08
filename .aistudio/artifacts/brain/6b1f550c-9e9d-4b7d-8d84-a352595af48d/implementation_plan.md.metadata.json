@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan przebudowy aplikacji pod kątem 100% bezpieczeństwa na publicznym GitHubie: usunięcie wszystkich domyślnych profili i kluczy z repozytorium, wprowadzenie obowiązkowej blokady instalacji PWA na telefonie/tablecie oraz wymuszenie konfiguracji Firebase JSON i logowania Google OAuth wyłącznie wewnątrz zainstalowanej aplikacji PWA.",
-  "updatedAt":  "2026-11-08T18:18:31.232186386Z",
+  "summary":  "Plan usunięcia list wyboru profili z zakładki 4 (Profile) oraz zakładki 1 (Wybór Treningu): aplikacja wyświetla wyłącznie profil i parametry aktualnie zalogowanego konta Google, a treningi działają bez podziału na profile.",
+  "updatedAt":  "2026-11-08T20:52:25.368994053Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
