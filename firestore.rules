@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper: Require authenticated user via Google OAuth (never anonymous)
+    function isGoogleAuthenticated() {
+      return request.auth != null &&
+             request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    match /hubConfig/{configId} {
+      allow read: if isGoogleAuthenticated();
+      allow create, update: if isGoogleAuthenticated()
+        && request.resource.data.keys().hasAll(['updatedAtIso'])
+        && request.resource.data.updatedAtIso is string;
+      allow delete: if false;
+    }
+
+    match /profiles/{profileId} {
+      allow read: if isGoogleAuthenticated();
+      allow create, update: if isGoogleAuthenticated()
+        && request.resource.data.keys().hasAll(['id', 'name', 'ftpWatts', 'weightKg'])
+        && request.resource.data.id is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.ftpWatts is number
+        && request.resource.data.weightKg is number;
+      allow delete: if isGoogleAuthenticated();
+    }
+
+    match /plannedWorkouts/{workoutId} {
+      allow read: if isGoogleAuthenticated();
+      allow create, update: if isGoogleAuthenticated()
+        && request.resource.data.keys().hasAll(['id', 'profileId', 'name', 'blocks'])
+        && request.resource.data.id is string
+        && request.resource.data.profileId is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 200
+        && request.resource.data.blocks is list;
+      allow delete: if isGoogleAuthenticated();
+    }
+
+    match /completedWorkouts/{activityId} {
+      allow read: if isGoogleAuthenticated();
+      allow create, update: if isGoogleAuthenticated()
+        && request.resource.data.keys().hasAll(['id', 'profileId', 'workoutName', 'startedAtIso', 'durationSec'])
+        && request.resource.data.id is string
+        && request.resource.data.profileId is string
+        && request.resource.data.workoutName is string
+        && request.resource.data.workoutName.size() <= 240
+        && request.resource.data.startedAtIso is string
+        && request.resource.data.durationSec is number;
+      allow delete: if isGoogleAuthenticated();
+    }
+  }
+}

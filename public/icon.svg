@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#0B0F17"/>
+  <rect x="24" y="24" width="464" height="464" rx="92" stroke="#1E293B" stroke-width="8"/>
+  <path d="M96 344L176 264L248 296L336 168L416 200" stroke="#10B981" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M96 384H416" stroke="#334155" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="176" cy="264" r="18" fill="#10B981"/>
+  <circle cx="336" cy="168" r="22" fill="#F59E0B"/>
+  <text x="96" y="148" fill="#F8FAFC" font-family="monospace" font-weight="bold" font-size="64">FTMS</text>
+</svg>

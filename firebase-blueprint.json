@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "HubConfig": {
+      "title": "HubConfig",
+      "description": "Global configuration and registered Google riders roster for the shared Domyos Cycling Hub Firebase instance.",
+      "type": "object",
+      "properties": {
+        "updatedAtIso": { "type": "string" },
+        "primaryAdminUid": { "type": "string" },
+        "primaryAdminEmail": { "type": "string" },
+        "registeredRiders": { "type": "array" }
+      },
+      "required": ["updatedAtIso"]
+    },
+    "AthleteProfile": {
+      "title": "AthleteProfile",
+      "description": "Dynamic rider profile linked to a Google OAuth account with FTP, HR zones, Intervals.icu and Google Fit settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "name": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "avatarColor": { "type": "string" },
+        "ftpWatts": { "type": "number" },
+        "weightKg": { "type": "number" },
+        "maxHrBpm": { "type": "number" },
+        "restingHrBpm": { "type": "number" },
+        "lthrBpm": { "type": "number" },
+        "offlineMode": { "type": "string" },
+        "hrZones": { "type": "array" },
+        "powerZones": { "type": "array" },
+        "intervals": { "type": "object" },
+        "googleFit": { "type": "object" },
+        "updatedAtIso": { "type": "string" }
+      },
+      "required": ["id", "name", "ftpWatts", "weightKg"]
+    },
+    "StructuredWorkout": {
+      "title": "StructuredWorkout",
+      "description": "Planned or custom ERG structured workout definition with ramp and interval blocks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "profileId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "source": { "type": "string" },
+        "blocks": { "type": "array" },
+        "createdAtIso": { "type": "string" },
+        "updatedAtIso": { "type": "string" }
+      },
+      "required": ["id", "profileId", "name", "blocks"]
+    },
+    "CompletedActivity": {
+      "title": "CompletedActivity",
+      "description": "Completed indoor cycling activity with summary metrics, telemetry samples, and binary .FIT file in Base64.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "profileId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "workoutName": { "type": "string" },
+        "startedAtIso": { "type": "string" },
+        "durationSec": { "type": "number" },
+        "ftpAtRideWatts": { "type": "number" },
+        "avgPowerWatts": { "type": "number" },
+        "maxPowerWatts": { "type": "number" },
+        "normalizedPowerWatts": { "type": "number" },
+        "intensityFactor": { "type": "number" },
+        "tss": { "type": "number" },
+        "workKj": { "type": "number" },
+        "avgHrBpm": { "type": "number" },
+        "maxHrBpm": { "type": "number" },
+        "avgCadenceRpm": { "type": "number" },
+        "maxCadenceRpm": { "type": "number" },
+        "avgSpeedKmh": { "type": "number" },
+        "totalDistanceMeters": { "type": "number" },
+        "caloriesKcal": { "type": "number" },
+        "records": { "type": "array" },
+        "fitBase64": { "type": "string" },
+        "syncedToFirebase": { "type": "boolean" },
+        "syncedToIntervals": { "type": "boolean" },
+        "syncedToGoogleFit": { "type": "boolean" }
+      },
+      "required": ["id", "profileId", "workoutName", "startedAtIso", "durationSec"]
+    }
+  },
+  "firestore": {
+    "/hubConfig/{configId}": {
+      "schema": { "$ref": "#/entities/HubConfig" },
+      "description": "Central hub configuration and known riders roster"
+    },
+    "/profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/AthleteProfile" },
+      "description": "Dynamic athlete profiles synced across devices"
+    },
+    "/plannedWorkouts/{workoutId}": {
+      "schema": { "$ref": "#/entities/StructuredWorkout" },
+      "description": "Planned and custom structured workouts"
+    },
+    "/completedWorkouts/{activityId}": {
+      "schema": { "$ref": "#/entities/CompletedActivity" },
+      "description": "Completed workouts with telemetry and Base64 .FIT files"
+    }
+  }
+}

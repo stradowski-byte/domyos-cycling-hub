@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Never commit personal athlete data, FIT rides, or local state backups
+*.fit
+*.tcx
+*profile_state*.json
+*domyos_hub_state*.json
+Domyos_Kopia_Profili*.json

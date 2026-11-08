@@ -1,0 +1,6 @@
+{
+  "summary":  "Zaktualizowany plan architektury: jedna centralna baza Firebase (predefiniowany JSON), obowiazkowe logowanie Google OAuth dla kazdego uzytkownika (brak logowania anonimowego), szybki przelacznik kont Google (Fast User Switcher z login_hint), synchronizacja z Firebase Firestore + Intervals.icu + Google Fit REST API oraz wdrozenie PWA przez GitHub Actions.",
+  "updatedAt":  "2026-11-08T17:39:34.732238602Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
