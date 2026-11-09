@@ -17,6 +17,8 @@ import { KnownGoogleRider } from '../types/cycling';
 import {
   activeConfig,
   clearCustomFirebaseConfig,
+  FIREBASE_CONSOLE_PLACEHOLDER,
+  formatFirebaseConfigText,
   isAIStudioPreviewEnvironment,
   isConfigured,
   isUsingCustomConfig,
@@ -49,7 +51,7 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
 
   const [firebaseJsonText, setFirebaseJsonText] = useState(() =>
     isConfigured && activeConfig?.apiKey
-      ? JSON.stringify(activeConfig, null, 2)
+      ? formatFirebaseConfigText(activeConfig)
       : ''
   );
   const [configError, setConfigError] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
     } catch (err: any) {
       setConfigError(
         err?.message ||
-          'Nieprawidłowy format JSON. Wklej obiekt firebaseConfig zawierający przynajmniej apiKey oraz projectId.'
+          'Nieprawidłowy format konfiguracji. Skopiuj i wklej firebaseConfig bezpośrednio z konsoli Firebase.'
       );
     }
   };
@@ -298,15 +300,15 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
 
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-300">
-                Obiekt JSON Firebase (z Konsoli Firebase → Ustawienia projektu →
-                Twoje aplikacje):
+                Konfiguracja firebaseConfig (z Konsoli Firebase → Project settings →
+                General → Your apps):
               </label>
               <textarea
-                rows={8}
+                rows={10}
                 required
                 value={firebaseJsonText}
                 onChange={(e) => setFirebaseJsonText(e.target.value)}
-                placeholder={`{\n  "apiKey": "AIzaSy...",\n  "authDomain": "twoj-projekt.firebaseapp.com",\n  "projectId": "twoj-projekt",\n  "appId": "1:123456789:web:abcdef",\n  "firestoreDatabaseId": "(default)"\n}`}
+                placeholder={FIREBASE_CONSOLE_PLACEHOLDER}
                 className="w-full p-3.5 rounded-2xl bg-[#0B0F17] border border-slate-700 font-mono-tabular text-xs text-emerald-300 focus:border-emerald-500 focus:outline-none"
               />
             </div>
@@ -322,8 +324,7 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
                 </button>
               ) : (
                 <span className="text-[11px] text-slate-400">
-                  Obsługuje czysty JSON lub fragment kodu{' '}
-                  <code>const firebaseConfig = &#123;...&#125;</code>
+                  Wklej cały obiekt <code>const firebaseConfig = &#123;...&#125;</code> lub same linie bez nawiasów
                 </span>
               )}
 

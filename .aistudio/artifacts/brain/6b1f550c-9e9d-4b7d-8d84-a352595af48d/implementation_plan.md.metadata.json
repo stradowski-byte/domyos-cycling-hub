@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan przygotowania kompleksowej polskiej dokumentacji technicznej i architektonicznej (README.md) dla repozytorium GitHub projektu Domyos Cycling Hub (ERG & FIT Studio), wyjasniajacej co, dlaczego, jak i gdzie dziala w systemie (PWA Gate, Web Bluetooth FTMS, OPFS, binarny koder .FIT, Firebase BYOK i fizjologia).",
-  "updatedAt":  "2026-11-08T21:06:43.524289084Z",
+  "summary":  "Plan przebudowy parsera i formatera konfiguracji Firebase tak, aby wyswietlal i przyjmowal dokladny format generowany przez konsole Firebase (klucze bez cudzyslowow, obsluga wklejenia bez nawiasow klamrowych {}, z pelnego skryptu SDK lub czystego obiektu).",
+  "updatedAt":  "2026-11-09T19:37:07.084872657Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

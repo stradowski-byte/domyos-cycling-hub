@@ -48,28 +48,127 @@ if (isLocalEnv && !forceProd) {
     {};
 }
 
-export function parseCustomFirebaseInput(rawInput: string) {
-  let cleaned = rawInput.trim();
-  const match = cleaned.match(/firebaseConfig\s*=\s*(\{[\s\S]*?\});?/);
-  if (match && match[1]) {
-    cleaned = match[1];
-  } else {
-    const firstBrace = cleaned.indexOf('{');
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+export const FIREBASE_CONSOLE_PLACEHOLDER = `const firebaseConfig = {
+  apiKey: "AIzaSy...",
+  authDomain: "twoj-projekt.firebaseapp.com",
+  projectId: "twoj-projekt",
+  storageBucket: "twoj-projekt.firebasestorage.app",
+  messagingSenderId: "1234567890",
+  appId: "1:1234567890:web:abcdef123456",
+  measurementId: "G-XXXXXXXXXX"
+};`;
+
+const FIREBASE_CONFIG_ORDERED_KEYS = [
+  'apiKey',
+  'authDomain',
+  'projectId',
+  'storageBucket',
+  'messagingSenderId',
+  'appId',
+  'measurementId',
+  'databaseURL',
+  'firestoreDatabaseId',
+  'oAuthClientId',
+  'recaptchaSiteKey',
+] as const;
+
+/**
+ * Formats a Firebase configuration object into the exact JavaScript snippet format
+ * shown in the Firebase Console (unquoted property keys, standard key ordering).
+ */
+export function formatFirebaseConfigText(
+  config: Record<string, any> | null | undefined
+): string {
+  if (!config || !config.apiKey || !config.projectId) {
+    return '';
+  }
+
+  const standardKeys = [
+    'apiKey',
+    'authDomain',
+    'projectId',
+    'storageBucket',
+    'messagingSenderId',
+    'appId',
+    'measurementId',
+  ];
+
+  const lines: string[] = [];
+  for (const key of standardKeys) {
+    const val = config[key];
+    if (typeof val === 'string' && val.trim() !== '') {
+      lines.push(`  ${key}: "${val.trim()}"`);
     }
   }
-  cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
-  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
 
-  const parsed = JSON.parse(cleaned);
-  if (!parsed.apiKey || !parsed.projectId) {
+  // Include optional non-default Firestore database ID only if explicitly custom
+  if (
+    typeof config.firestoreDatabaseId === 'string' &&
+    config.firestoreDatabaseId.trim() !== '' &&
+    config.firestoreDatabaseId.trim() !== '(default)'
+  ) {
+    lines.push(`  firestoreDatabaseId: "${config.firestoreDatabaseId.trim()}"`);
+  }
+
+  return `const firebaseConfig = {\n${lines.join(',\n')}\n};`;
+}
+
+/**
+ * Parses a Firebase configuration pasted from the Firebase Console in any format:
+ * - Full SDK snippet (`import { initializeApp } ... const firebaseConfig = { apiKey: "...", ... };`)
+ * - `const firebaseConfig = { apiKey: "...", ... };`
+ * - Raw key-value lines without `{ }` braces (`apiKey: "...", projectId: "..."`)
+ * - Object with unquoted keys (`{ apiKey: "...", projectId: "..." }`)
+ * - Standard JSON (`{ "apiKey": "...", "projectId": "..." }`)
+ */
+export function parseCustomFirebaseInput(rawInput: string): Record<string, string> {
+  if (!rawInput || !rawInput.trim()) {
     throw new Error(
-      'Brakuje wymaganych pól (apiKey, projectId) w konfiguracji JSON Firebase.'
+      'Wklej konfigurację firebaseConfig skopiowaną z konsoli Firebase.'
     );
   }
-  return parsed;
+
+  // 1. Strip block comments /* ... */ and single-line comments // ... (outside of URLs like https://)
+  const withoutComments = rawInput
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  // 2. If the input contains `firebaseConfig = { ... }`, isolate that block first to avoid matching anything outside
+  const configBlockMatch = withoutComments.match(
+    /firebaseConfig\s*=\s*\{([\s\S]*?)\}/
+  );
+  const targetText = configBlockMatch ? configBlockMatch[1] : withoutComments;
+
+  const extracted: Record<string, string> = {};
+  const allowedKeys = new Set<string>(FIREBASE_CONFIG_ORDERED_KEYS);
+
+  // 3. Match both unquoted keys (`apiKey: "..."`) and quoted keys (`"apiKey": "..."` or `'apiKey': '...'`)
+  // Works with or without surrounding `{ }` brackets.
+  const keyValueRegex =
+    /["']?([a-zA-Z0-9_]+)["']?\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|([^,\n\r};]+))/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = keyValueRegex.exec(targetText)) !== null) {
+    const key = match[1]?.trim();
+    const rawVal =
+      match[2] !== undefined
+        ? match[2]
+        : match[3] !== undefined
+        ? match[3]
+        : (match[4] || '').trim().replace(/^["']|["']$/g, '');
+
+    if (key && allowedKeys.has(key)) {
+      extracted[key] = rawVal.trim();
+    }
+  }
+
+  if (!extracted.apiKey || !extracted.projectId) {
+    throw new Error(
+      'Nie znaleziono wymaganych pól apiKey oraz projectId. Skopiuj i wklej konfigurację firebaseConfig bezpośrednio z konsoli Firebase.'
+    );
+  }
+
+  return extracted;
 }
 
 export function getActiveFirebaseConfig() {

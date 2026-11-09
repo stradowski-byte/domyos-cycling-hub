@@ -42,6 +42,8 @@ import {
 import {
   activeConfig,
   clearCustomFirebaseConfig,
+  FIREBASE_CONSOLE_PLACEHOLDER,
+  formatFirebaseConfigText,
   isUsingCustomConfig,
   saveCustomFirebaseConfig,
 } from '../lib/firebase';
@@ -102,7 +104,7 @@ export const ProfilesAndCloudSettingsView: React.FC<
   const [showCustomFirebaseConfig, setShowCustomFirebaseConfig] =
     useState(false);
   const [firebaseJsonInput, setFirebaseJsonInput] = useState(() =>
-    JSON.stringify(activeConfig, null, 2)
+    formatFirebaseConfigText(activeConfig)
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -504,9 +506,10 @@ export const ProfilesAndCloudSettingsView: React.FC<
               )}
             </div>
             <textarea
-              rows={7}
+              rows={9}
               value={firebaseJsonInput}
               onChange={(e) => setFirebaseJsonInput(e.target.value)}
+              placeholder={FIREBASE_CONSOLE_PLACEHOLDER}
               className="w-full p-3 rounded-xl bg-[#131B26] border border-slate-700 font-mono-tabular text-xs text-emerald-300 focus:border-emerald-500 focus:outline-none"
             />
             <div className="flex justify-end">
