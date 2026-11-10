@@ -35,7 +35,10 @@ jobs:
           npm install --legacy-peer-deps
 
       - name: Build Production PWA Bundle
-        run: npm run build
+        run: |
+          npm run build
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
       - name: Deploy to GitHub Pages (gh-pages branch)
         uses: peaceiris/actions-gh-pages@v4
