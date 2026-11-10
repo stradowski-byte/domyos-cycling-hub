@@ -6,6 +6,8 @@ import {
   onSnapshot,
   getDocs,
   getDoc,
+  query,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { User } from 'firebase/auth';
@@ -121,6 +123,7 @@ export async function flushOfflineSyncQueueWithBatch(): Promise<number> {
 
   let flushedCount = 0;
   const chunkSize = 400;
+  const currentUid = auth.currentUser.uid;
 
   try {
     for (let i = 0; i < queue.length; i += chunkSize) {
@@ -131,7 +134,15 @@ export async function flushOfflineSyncQueueWithBatch(): Promise<number> {
         if (item.op === 'delete') {
           batch.delete(ref);
         } else if (item.payload) {
-          batch.set(ref, item.payload, { merge: true });
+          const enrichedPayload =
+            item.collectionName === 'hubConfig'
+              ? item.payload
+              : {
+                  ...item.payload,
+                  uid: currentUid,
+                  ownerUid: currentUid,
+                };
+          batch.set(ref, enrichedPayload, { merge: true });
         }
       }
       await batch.commit();
@@ -473,6 +484,7 @@ export async function ensureFirestoreCollectionsInitialized(params: {
   }
 
   const initializedCollections: string[] = [];
+  const currentUid = auth.currentUser.uid;
 
   try {
     // First flush any queued offline mutations
@@ -481,10 +493,21 @@ export async function ensureFirestoreCollectionsInitialized(params: {
     const hubDocRef = doc(db, 'hubConfig', 'default');
     const profDocRef = doc(db, 'profiles', params.profile.id);
 
-    const [hubSnap, profSnap, workSnap] = await Promise.all([
+    const [hubSnap, profSnap, ownedWorkSnap, sharedWorkSnap] = await Promise.all([
       getDoc(hubDocRef),
       getDoc(profDocRef),
-      getDocs(collection(db, 'plannedWorkouts')),
+      getDocs(
+        query(
+          collection(db, 'plannedWorkouts'),
+          where('ownerUid', '==', currentUid)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'plannedWorkouts'),
+          where('profileId', '==', 'shared')
+        )
+      ),
     ]);
 
     const existingCloudTags =
@@ -495,12 +518,16 @@ export async function ensureFirestoreCollectionsInitialized(params: {
     saveWorkoutTagsLocally(mergedTags);
 
     const existingCloudWorkoutsMap = new Map<string, StructuredWorkout>();
-    workSnap.forEach((d) => {
-      const data = d.data() as StructuredWorkout;
-      if (data && data.id && Array.isArray(data.blocks)) {
-        existingCloudWorkoutsMap.set(data.id, data);
-      }
-    });
+    const collectWorkoutSnap = (snap: typeof ownedWorkSnap) => {
+      snap.forEach((d) => {
+        const data = d.data() as StructuredWorkout;
+        if (data && data.id && Array.isArray(data.blocks)) {
+          existingCloudWorkoutsMap.set(data.id, data);
+        }
+      });
+    };
+    collectWorkoutSnap(ownedWorkSnap);
+    collectWorkoutSnap(sharedWorkSnap);
 
     const fullNormalizedLibrary = mergeAndNormalizeWorkoutsLibrary([
       ...Array.from(existingCloudWorkoutsMap.values()),
@@ -524,12 +551,14 @@ export async function ensureFirestoreCollectionsInitialized(params: {
       initializedCollections.push('hubConfig');
     }
 
-    // 2. Initialize profiles/{profile.id} if missing
+    // 2. Initialize profiles/{profile.id} if missing (strictly stamped with uid & ownerUid)
     if (!profSnap.exists()) {
       batch.set(
         profDocRef,
         sanitizeForFirestore({
           ...params.profile,
+          uid: currentUid,
+          ownerUid: currentUid,
           updatedAtIso: new Date().toISOString(),
         }),
         { merge: true }
@@ -552,8 +581,10 @@ export async function ensureFirestoreCollectionsInitialized(params: {
           doc(db, 'plannedWorkouts', w.id),
           sanitizeForFirestore({
             ...w,
+            profileId: w.profileId || 'shared',
             tags: normalizedTags,
-            ownerUid: w.ownerUid || auth.currentUser.uid,
+            ownerUid: currentUid,
+            uid: currentUid,
             updatedAtIso: new Date().toISOString(),
           }),
           { merge: true }
@@ -563,7 +594,7 @@ export async function ensureFirestoreCollectionsInitialized(params: {
       }
     }
 
-    if (workSnap.empty || addedOrTaggedWorkouts > 0) {
+    if (existingCloudWorkoutsMap.size === 0 || addedOrTaggedWorkouts > 0) {
       initializedCollections.push('plannedWorkouts');
     }
 
@@ -906,38 +937,52 @@ export async function fetchAllStateFromFirestore(): Promise<{
     throw new Error('Zaloguj się kontem Google, aby pobrać dane z Firebase.');
   }
 
-  const [profSnap, workSnap, actSnap] = await Promise.all([
-    getDocs(collection(db, 'profiles')),
-    getDocs(collection(db, 'plannedWorkouts')),
-    getDocs(collection(db, 'completedWorkouts')),
-  ]);
-
   const currentUid = auth.currentUser.uid;
-  const currentEmail = (auth.currentUser.email || '').toLowerCase();
+
+  const [profSnap, ownedWorkSnap, sharedWorkSnap, actSnap] = await Promise.all([
+    getDocs(query(collection(db, 'profiles'), where('uid', '==', currentUid))),
+    getDocs(
+      query(
+        collection(db, 'plannedWorkouts'),
+        where('ownerUid', '==', currentUid)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, 'plannedWorkouts'),
+        where('profileId', '==', 'shared')
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, 'completedWorkouts'),
+        where('ownerUid', '==', currentUid)
+      )
+    ),
+  ]);
 
   const profiles: Record<ProfileId, AthleteProfile> = {};
   profSnap.forEach((d) => {
     const data = d.data() as AthleteProfile;
-    if (
-      data &&
-      data.id &&
-      (data.uid === currentUid ||
-        (currentEmail && data.email?.toLowerCase() === currentEmail))
-    ) {
+    if (data && data.id) {
       profiles[data.id] = data;
     }
   });
 
-  const workouts: StructuredWorkout[] = [];
-  workSnap.forEach((d) => {
-    const data = d.data() as StructuredWorkout;
-    if (data && data.id && Array.isArray(data.blocks)) {
-      workouts.push({
-        ...data,
-        tags: inferWorkoutTags(data),
-      });
-    }
-  });
+  const workoutsMap = new Map<string, StructuredWorkout>();
+  const appendWorkoutDocs = (snap: typeof ownedWorkSnap) => {
+    snap.forEach((d) => {
+      const data = d.data() as StructuredWorkout;
+      if (data && data.id && Array.isArray(data.blocks)) {
+        workoutsMap.set(data.id, {
+          ...data,
+          tags: inferWorkoutTags(data),
+        });
+      }
+    });
+  };
+  appendWorkoutDocs(ownedWorkSnap);
+  appendWorkoutDocs(sharedWorkSnap);
 
   const activities: CompletedActivity[] = [];
   actSnap.forEach((d) => {
@@ -954,15 +999,15 @@ export async function fetchAllStateFromFirestore(): Promise<{
 
   return {
     profiles,
-    workouts: mergeAndNormalizeWorkoutsLibrary(workouts),
+    workouts: mergeAndNormalizeWorkoutsLibrary(Array.from(workoutsMap.values())),
     activities,
   };
 }
 
 /**
  * Subscribes to real-time `onSnapshot` updates from the central Firebase Firestore
- * database for the active Google user's profile, planned workouts, completed workouts,
- * known riders, and custom workout category tags.
+ * database strictly filtered by the active Google user's `uid`/`ownerUid` and `'shared'`
+ * workouts so every query complies with `isOwnerOrShared(resource.data)` security rules.
  */
 export function subscribeToFirestoreHub(callbacks: {
   onProfilesSnapshot: (profiles: Record<ProfileId, AthleteProfile>) => void;
@@ -976,7 +1021,6 @@ export function subscribeToFirestoreHub(callbacks: {
   }
 
   const currentUid = auth.currentUser.uid;
-  const currentEmail = (auth.currentUser.email || '').toLowerCase();
 
   const unsubHub = onSnapshot(
     doc(db, 'hubConfig', 'default'),
@@ -1003,18 +1047,13 @@ export function subscribeToFirestoreHub(callbacks: {
   );
 
   const unsubProfiles = onSnapshot(
-    collection(db, 'profiles'),
+    query(collection(db, 'profiles'), where('uid', '==', currentUid)),
     (snap) => {
       if (snap.empty) return;
       const map: Record<ProfileId, AthleteProfile> = {};
       snap.forEach((d) => {
         const prof = d.data() as AthleteProfile;
-        if (
-          prof &&
-          prof.id &&
-          (prof.uid === currentUid ||
-            (currentEmail && prof.email?.toLowerCase() === currentEmail))
-        ) {
+        if (prof && prof.id) {
           map[prof.id] = prof;
         }
       });
@@ -1025,29 +1064,61 @@ export function subscribeToFirestoreHub(callbacks: {
     (err) => handleFirestoreError(err, OperationType.LIST, 'profiles')
   );
 
-  const unsubWorkouts = onSnapshot(
-    collection(db, 'plannedWorkouts'),
+  // Maintain merged map of owned + shared plannedWorkouts across two rule-compliant queries
+  const ownedWorkoutsMap = new Map<string, StructuredWorkout>();
+  const sharedWorkoutsMap = new Map<string, StructuredWorkout>();
+
+  const emitMergedWorkouts = () => {
+    const combined = new Map<string, StructuredWorkout>([
+      ...sharedWorkoutsMap.entries(),
+      ...ownedWorkoutsMap.entries(),
+    ]);
+    if (combined.size > 0) {
+      callbacks.onWorkoutsSnapshot(Array.from(combined.values()));
+    }
+  };
+
+  const unsubOwnedWorkouts = onSnapshot(
+    query(collection(db, 'plannedWorkouts'), where('ownerUid', '==', currentUid)),
     (snap) => {
-      if (snap.empty) return;
-      const list: StructuredWorkout[] = [];
+      ownedWorkoutsMap.clear();
       snap.forEach((d) => {
         const w = d.data() as StructuredWorkout;
         if (w && w.id && Array.isArray(w.blocks)) {
-          list.push({
+          ownedWorkoutsMap.set(w.id, {
             ...w,
             tags: inferWorkoutTags(w),
           });
         }
       });
-      if (list.length > 0) {
-        callbacks.onWorkoutsSnapshot(list);
-      }
+      emitMergedWorkouts();
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, 'plannedWorkouts')
+  );
+
+  const unsubSharedWorkouts = onSnapshot(
+    query(collection(db, 'plannedWorkouts'), where('profileId', '==', 'shared')),
+    (snap) => {
+      sharedWorkoutsMap.clear();
+      snap.forEach((d) => {
+        const w = d.data() as StructuredWorkout;
+        if (w && w.id && Array.isArray(w.blocks)) {
+          sharedWorkoutsMap.set(w.id, {
+            ...w,
+            tags: inferWorkoutTags(w),
+          });
+        }
+      });
+      emitMergedWorkouts();
     },
     (err) => handleFirestoreError(err, OperationType.LIST, 'plannedWorkouts')
   );
 
   const unsubActivities = onSnapshot(
-    collection(db, 'completedWorkouts'),
+    query(
+      collection(db, 'completedWorkouts'),
+      where('ownerUid', '==', currentUid)
+    ),
     (snap) => {
       if (snap.empty) return;
       const list: CompletedActivity[] = [];
@@ -1071,7 +1142,8 @@ export function subscribeToFirestoreHub(callbacks: {
   return () => {
     unsubHub();
     unsubProfiles();
-    unsubWorkouts();
+    unsubOwnedWorkouts();
+    unsubSharedWorkouts();
     unsubActivities();
   };
 }

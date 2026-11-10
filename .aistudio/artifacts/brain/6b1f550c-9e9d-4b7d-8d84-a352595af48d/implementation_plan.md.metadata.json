@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan audytu bezpieczeństwa i pełnego oczyszczenia repozytorium GitHub (wyczyszczenie firebase-applet-config.json do {}, usunięcie prywatnych zrzutów ekranu z /public/assets/aistudio i /docs, usunięcie zahardkodowanych nazw użytkownika z kodu) oraz wdrożenia prywatnego systemu logów diagnostycznych (OPFS/localStorage + kolekcja securityAuditLogs w Firebase bez użycia console.log/error) wraz z panelem Audytu Bezpieczeństwa w zakładce 5. Chmura Firebase.",
-  "updatedAt":  "2026-11-10T17:49:47.435106100Z",
+  "summary":  "Plan naprawy dwóch luk logicznych w regułach bezpieczeństwa firestore.rules (usunięcie warunku braku właściciela w isOwnerOrShared oraz dodanie weryfikacji właściciela przy odczycie allow read) wraz z dostosowaniem wszystkich zapytań getDocs i onSnapshot we frontendzie do używania filtrów .where('ownerUid', '==', currentUid) oraz .where('profileId', '==', 'shared').",
+  "updatedAt":  "2026-11-10T18:22:04.255948820Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

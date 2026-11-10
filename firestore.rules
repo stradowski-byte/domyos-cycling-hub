@@ -1,19 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. TYLKO zweryfikowane konta Google OAuth (ZERO dostępu anonimowego / hasła)
+    // 1. TYLKO zweryfikowane konta Google OAuth (ZERO dostępu anonimowego)
     function isVerifiedGoogleUser() {
       return request.auth != null &&
              request.auth.token.firebase.sign_in_provider == 'google.com' &&
              request.auth.token.email_verified == true;
     }
 
-    // 2. Izolacja zapisu po UID zalogowanego użytkownika Google (lub trening wspólny 'shared')
+    // 2. Izolacja: TWARDO wymaga zgodności UID lub jawnej flagi 'shared' (brak luki dla osieroconych dokumentów)
     function isOwnerOrShared(data) {
-      return !('uid' in data) && !('ownerUid' in data)
-             || ('uid' in data && data.uid == request.auth.uid)
-             || ('ownerUid' in data && data.ownerUid == request.auth.uid)
-             || ('profileId' in data && data.profileId == 'shared');
+      return (('uid' in data) && data.uid == request.auth.uid)
+          || (('ownerUid' in data) && data.ownerUid == request.auth.uid)
+          || (('profileId' in data) && data.profileId == 'shared');
     }
 
     match /hubConfig/{configId} {
@@ -25,7 +24,9 @@ service cloud.firestore {
     }
 
     match /profiles/{profileId} {
-      allow read: if isVerifiedGoogleUser();
+      // Zabezpieczony odczyt: tylko własne (lub sprawdzenie istnienia dokumentu przy pierwszym logowaniu)
+      allow read: if isVerifiedGoogleUser()
+        && (resource == null || isOwnerOrShared(resource.data));
       allow create, update: if isVerifiedGoogleUser()
         && isOwnerOrShared(request.resource.data)
         && (resource == null || isOwnerOrShared(resource.data))
@@ -41,7 +42,9 @@ service cloud.firestore {
     }
 
     match /plannedWorkouts/{workoutId} {
-      allow read: if isVerifiedGoogleUser();
+      // Zabezpieczony odczyt: tylko własne lub 'shared'
+      allow read: if isVerifiedGoogleUser()
+        && (resource == null || isOwnerOrShared(resource.data));
       allow create, update: if isVerifiedGoogleUser()
         && isOwnerOrShared(request.resource.data)
         && (resource == null || isOwnerOrShared(resource.data))
@@ -57,7 +60,9 @@ service cloud.firestore {
     }
 
     match /completedWorkouts/{activityId} {
-      allow read: if isVerifiedGoogleUser();
+      // Zabezpieczony odczyt: tylko własne ukończone treningi
+      allow read: if isVerifiedGoogleUser()
+        && (resource == null || isOwnerOrShared(resource.data));
       allow create, update: if isVerifiedGoogleUser()
         && isOwnerOrShared(request.resource.data)
         && (resource == null || isOwnerOrShared(resource.data))

@@ -2,6 +2,8 @@ import {
   collection,
   doc,
   getDocs,
+  query,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -153,15 +155,15 @@ export async function syncPrivateAuditLogsWithFirestore(): Promise<{
   const fp = getFirebaseConfigFingerprint(activeConfig);
 
   try {
-    const snap = await getDocs(collection(db, 'securityAuditLogs'));
+    const logsQuery = query(
+      collection(db, 'securityAuditLogs'),
+      where('ownerUid', '==', currentUid)
+    );
+    const snap = await getDocs(logsQuery);
     const cloudMap = new Map<string, SecurityAuditLogEntry>();
     snap.forEach((d) => {
       const data = d.data() as SecurityAuditLogEntry;
-      if (
-        data &&
-        data.id &&
-        (!data.uid || data.uid === currentUid || data.ownerUid === currentUid)
-      ) {
+      if (data && data.id) {
         cloudMap.set(data.id, { ...data, syncedToFirebase: true });
       }
     });
@@ -221,15 +223,16 @@ export async function clearAllPrivateAuditLogs(): Promise<void> {
   if (!db || !auth?.currentUser) return;
   const currentUid = auth.currentUser.uid;
   try {
-    const snap = await getDocs(collection(db, 'securityAuditLogs'));
+    const logsQuery = query(
+      collection(db, 'securityAuditLogs'),
+      where('ownerUid', '==', currentUid)
+    );
+    const snap = await getDocs(logsQuery);
     const batch = writeBatch(db);
     let count = 0;
     snap.forEach((d) => {
-      const data = d.data() as SecurityAuditLogEntry;
-      if (!data.uid || data.uid === currentUid || data.ownerUid === currentUid) {
-        batch.delete(doc(db, 'securityAuditLogs', d.id));
-        count++;
-      }
+      batch.delete(doc(db, 'securityAuditLogs', d.id));
+      count++;
     });
     if (count > 0) {
       await batch.commit();
