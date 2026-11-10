@@ -20,8 +20,10 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Sanitize package.json & Install dependencies
+      - name: Zero-Leak Sanitize & Install dependencies
         run: |
+          rm -rf public/assets docs
+          echo "{}" > firebase-applet-config.json
           node -e '
             const fs = require("fs");
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));

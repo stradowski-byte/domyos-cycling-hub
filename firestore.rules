@@ -1,23 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper: Require authenticated user via Google OAuth (never anonymous)
-    function isGoogleAuthenticated() {
+    // 1. TYLKO zweryfikowane konta Google OAuth (ZERO dostępu anonimowego / hasła)
+    function isVerifiedGoogleUser() {
       return request.auth != null &&
-             request.auth.token.firebase.sign_in_provider != 'anonymous';
+             request.auth.token.firebase.sign_in_provider == 'google.com' &&
+             request.auth.token.email_verified == true;
+    }
+
+    // 2. Izolacja zapisu po UID zalogowanego użytkownika Google (lub trening wspólny 'shared')
+    function isOwnerOrShared(data) {
+      return !('uid' in data) && !('ownerUid' in data)
+             || ('uid' in data && data.uid == request.auth.uid)
+             || ('ownerUid' in data && data.ownerUid == request.auth.uid)
+             || ('profileId' in data && data.profileId == 'shared');
     }
 
     match /hubConfig/{configId} {
-      allow read: if isGoogleAuthenticated();
-      allow create, update: if isGoogleAuthenticated()
+      allow read: if isVerifiedGoogleUser();
+      allow create, update: if isVerifiedGoogleUser()
         && request.resource.data.keys().hasAll(['updatedAtIso'])
         && request.resource.data.updatedAtIso is string;
       allow delete: if false;
     }
 
     match /profiles/{profileId} {
-      allow read: if isGoogleAuthenticated();
-      allow create, update: if isGoogleAuthenticated()
+      allow read: if isVerifiedGoogleUser();
+      allow create, update: if isVerifiedGoogleUser()
+        && isOwnerOrShared(request.resource.data)
+        && (resource == null || isOwnerOrShared(resource.data))
         && request.resource.data.keys().hasAll(['id', 'name', 'ftpWatts', 'weightKg'])
         && request.resource.data.id is string
         && request.resource.data.name is string
@@ -25,12 +36,15 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 120
         && request.resource.data.ftpWatts is number
         && request.resource.data.weightKg is number;
-      allow delete: if isGoogleAuthenticated();
+      allow delete: if isVerifiedGoogleUser()
+        && isOwnerOrShared(resource.data);
     }
 
     match /plannedWorkouts/{workoutId} {
-      allow read: if isGoogleAuthenticated();
-      allow create, update: if isGoogleAuthenticated()
+      allow read: if isVerifiedGoogleUser();
+      allow create, update: if isVerifiedGoogleUser()
+        && isOwnerOrShared(request.resource.data)
+        && (resource == null || isOwnerOrShared(resource.data))
         && request.resource.data.keys().hasAll(['id', 'profileId', 'name', 'blocks'])
         && request.resource.data.id is string
         && request.resource.data.profileId is string
@@ -38,12 +52,15 @@ service cloud.firestore {
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 200
         && request.resource.data.blocks is list;
-      allow delete: if isGoogleAuthenticated();
+      allow delete: if isVerifiedGoogleUser()
+        && isOwnerOrShared(resource.data);
     }
 
     match /completedWorkouts/{activityId} {
-      allow read: if isGoogleAuthenticated();
-      allow create, update: if isGoogleAuthenticated()
+      allow read: if isVerifiedGoogleUser();
+      allow create, update: if isVerifiedGoogleUser()
+        && isOwnerOrShared(request.resource.data)
+        && (resource == null || isOwnerOrShared(resource.data))
         && request.resource.data.keys().hasAll(['id', 'profileId', 'workoutName', 'startedAtIso', 'durationSec'])
         && request.resource.data.id is string
         && request.resource.data.profileId is string
@@ -51,7 +68,25 @@ service cloud.firestore {
         && request.resource.data.workoutName.size() <= 240
         && request.resource.data.startedAtIso is string
         && request.resource.data.durationSec is number;
-      allow delete: if isGoogleAuthenticated();
+      allow delete: if isVerifiedGoogleUser()
+        && isOwnerOrShared(resource.data);
+    }
+
+    match /securityAuditLogs/{logId} {
+      allow read: if isVerifiedGoogleUser()
+        && (resource == null || isOwnerOrShared(resource.data));
+      allow create, update: if isVerifiedGoogleUser()
+        && isOwnerOrShared(request.resource.data)
+        && (resource == null || isOwnerOrShared(resource.data))
+        && request.resource.data.keys().hasAll(['id', 'timestampIso', 'level', 'category', 'message'])
+        && request.resource.data.id is string
+        && request.resource.data.timestampIso is string
+        && request.resource.data.level is string
+        && request.resource.data.category is string
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 2000;
+      allow delete: if isVerifiedGoogleUser()
+        && isOwnerOrShared(resource.data);
     }
   }
 }

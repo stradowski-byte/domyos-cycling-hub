@@ -64,7 +64,13 @@ body.theme-soft-light {
 .theme-soft-light .bg-\[\#131B26\],
 .theme-soft-light .bg-\[\#131B26\]\/60 {
   background-color: #F8FAFC !important;
+  background-image: none !important;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.theme-soft-light [class*="bg-gradient-"] {
+  background-image: none !important;
+  background-color: #F8FAFC !important;
 }
 
 .theme-soft-light .bg-slate-900,

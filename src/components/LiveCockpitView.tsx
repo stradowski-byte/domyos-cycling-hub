@@ -468,12 +468,15 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
               />
             </div>
             <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] min-w-0">
-              <span
-                style={{ color: currentPowerZone.color }}
-                className="font-bold truncate min-w-0"
-              >
-                {currentPowerZone.name}
-              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: currentPowerZone.color }}
+                />
+                <span className="font-bold text-white truncate min-w-0">
+                  {currentPowerZone.name}
+                </span>
+              </div>
               <span className="font-mono-tabular text-slate-400 shrink-0">
                 {Math.round((displayedWatts / Math.max(1, profile.ftpWatts)) * 100)}% FTP
               </span>
@@ -544,12 +547,15 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
           <div className="space-y-0.5 pt-1 border-t border-slate-800/80 min-w-0">
             <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] min-w-0">
-              <span
-                style={{ color: currentHrZone.color }}
-                className="font-bold truncate min-w-0"
-              >
-                {currentHrZone.name}
-              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: currentHrZone.color }}
+                />
+                <span className="font-bold text-white truncate min-w-0">
+                  {currentHrZone.name}
+                </span>
+              </div>
               <span
                 className={`font-mono-tabular font-semibold truncate shrink-0 ${livePaHrMetrics.statusColor}`}
               >

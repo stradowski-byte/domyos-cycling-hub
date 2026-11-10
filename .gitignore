@@ -1,11 +1,18 @@
 node_modules/
 build/
 dist/
+docs/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Never commit AI Studio chat attachments or phone screenshots
+public/assets/
+*Screenshot*.jpg
+*Screenshot*.png
+*.htm
 
 # Never commit personal athlete data, FIT rides, or local state backups
 *.fit
@@ -13,3 +20,4 @@ coverage/
 *profile_state*.json
 *domyos_hub_state*.json
 Domyos_Kopia_Profili*.json
+*Audit_Report*.json

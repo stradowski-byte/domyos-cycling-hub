@@ -215,10 +215,10 @@ export function getHrZoneForBpm(bpm: number, zones: HeartRateZone[]): HeartRateZ
  * - "4x" repeat loops
  */
 export function parseIntervalsWorkoutText(text: string, fallbackFtp: number = 200): WorkoutBlock[] {
-  const lines = text
+  const rawLines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+    .filter((l) => !l.startsWith('#') && !l.startsWith('//'));
 
   const blocks: WorkoutBlock[] = [];
   let currentRepeat = 1;
@@ -240,11 +240,18 @@ export function parseIntervalsWorkoutText(text: string, fallbackFtp: number = 20
     }
   };
 
-  for (const line of lines) {
+  for (const line of rawLines) {
+    // Blank line ends any active Nx repeat group
+    if (line.length === 0) {
+      flushRepeats();
+      continue;
+    }
+
     const repeatMatch = line.match(/^(\d+)\s*x$/i);
     if (repeatMatch) {
       flushRepeats();
-      currentRepeat = Math.min(30, Math.max(1, parseInt(repeatMatch[1], 10)));
+      const count = parseInt(repeatMatch[1], 10);
+      currentRepeat = count <= 1 ? 1 : Math.min(30, count);
       continue;
     }
 
@@ -297,6 +304,17 @@ export function parseIntervalsWorkoutText(text: string, fallbackFtp: number = 20
       startValue = parseFloat(singleWattsMatch[1]);
       endValue = startValue;
       type = isRampKeyword ? 'ramp' : 'steady';
+    }
+
+    // Never allow a cooldown ramp (e.g. 60-40%) to be swallowed inside an Nx repeat loop
+    if (
+      currentRepeat > 1 &&
+      repeatBuffer.length >= 2 &&
+      type === 'ramp' &&
+      startValue > endValue &&
+      endValue <= 45
+    ) {
+      flushRepeats();
     }
 
     const targetCadenceRpm = rpmMatch ? parseInt(rpmMatch[1], 10) : 90;
@@ -594,7 +612,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 6m ramp 45-65% 88rpm\n4x\n- 9m 65% 90rpm\n- 30s 78% 105rpm\n- 6m 64% 88rpm\n- 2m ramp 60-42% 80rpm`
+        `- 6m ramp 45-65% 88rpm\n4x\n- 9m 65% 90rpm\n- 30s 78% 105rpm\n\n- 6m 64% 88rpm\n- 2m ramp 60-42% 80rpm`
       ),
     },
     {
@@ -609,7 +627,22 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 6m ramp 45-62% 88rpm\n3x\n- 8m ramp 60-73% 90rpm\n- 8m ramp 73-60% 88rpm\n- 6m ramp 60-42% 82rpm`
+        `- 6m ramp 45-62% 88rpm\n3x\n- 8m ramp 60-73% 90rpm\n- 8m ramp 73-60% 88rpm\n\n- 6m ramp 60-42% 82rpm`
+      ),
+    },
+    {
+      id: 'w_z2_endurance_75',
+      profileId: 'shared',
+      name: 'Długa Wytrzymałość Domowa Z2/Z3 (1h 15m)',
+      description:
+        'Pełna 75-minutowa sesja domowa łącząca bazę tlenową Z2 (68% FTP) z trzema 6-minutowymi wstawkami w dolnym Tempo Z3 (80% FTP) bez przekraczania 1h 20m.',
+      category: 'Endurance',
+      tags: ['Z2', 'Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 45-66% 88rpm\n3x\n- 14m 68% 90rpm\n- 6m 80% 92rpm\n\n- 7m ramp 62-42% 82rpm`
       ),
     },
 
@@ -643,7 +676,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 48-70% 88rpm\n3x\n- 10m ramp 72-85% 92rpm\n- 3m 60% 85rpm\n- 3m ramp 60-42% 80rpm`
+        `- 8m ramp 48-70% 88rpm\n3x\n- 10m ramp 72-85% 92rpm\n- 3m 60% 85rpm\n\n- 3m ramp 60-42% 80rpm`
       ),
     },
     {
@@ -658,17 +691,17 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 45-70% 88rpm\n4x\n- 5m 80% 68rpm\n- 3m 60% 90rpm\n- 5m ramp 62-42% 82rpm`
+        `- 8m ramp 45-70% 88rpm\n4x\n- 5m 80% 68rpm\n- 3m 60% 90rpm\n\n- 5m ramp 62-42% 82rpm`
       ),
     },
 
     // =========================================================================
-    // KATEGORIA 3: THRESHOLD / SWEET SPOT (PRÓG FTP) — 4 treningi
+    // KATEGORIA 3: THRESHOLD / SWEET SPOT (PRÓG FTP) — 5 treningów
     // =========================================================================
     {
       id: 'w_sweetspot_3x10',
       profileId: 'shared',
-      name: 'Klasyczny Sweet Spot 3x 10 min (50 min)',
+      name: 'Klasyczny Sweet Spot 3x 10 min (54 min)',
       description:
         'Złoty standard budowania bazy pod próg FTP: 3x 10 minut na 90% FTP z 4-minutowym odpoczynkiem. Wysoki bodziec adaptacyjny przy umiarkowanym koszcie zmęczenia.',
       category: 'Threshold',
@@ -677,13 +710,28 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 48-78% 90rpm\n3x\n- 10m 90% 92rpm\n- 4m 55% 85rpm\n- 4m ramp 60-42% 80rpm`
+        `- 8m ramp 48-78% 90rpm\n3x\n- 10m 90% 92rpm\n- 4m 55% 85rpm\n\n- 4m ramp 60-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_sweetspot_endurance_65',
+      profileId: 'shared',
+      name: 'Rozbudowany Sweet Spot 3x 12 min + Z2 (1h 05m)',
+      description:
+        'Pełna jednostka 65-minutowa: 3x 12 minut w paśmie Sweet Spot (90% FTP) domknięte 9-minutowym tlenem Z2 (66% FTP) — idealna pod 1h–1h 15m na trenażerze.',
+      category: 'Threshold',
+      tags: ['Threshold / Sweet Spot', 'Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 48-78% 90rpm\n3x\n- 12m 90% 92rpm\n- 3m 55% 85rpm\n\n- 8m 66% 90rpm\n- 4m ramp 60-42% 80rpm`
       ),
     },
     {
       id: 'w_threshold_over_unders_50',
       profileId: 'shared',
-      name: 'Over-Unders (Wypłukiwanie Mleczanu) 3x 9 min (50 min)',
+      name: 'Over-Unders (Wypłukiwanie Mleczanu) 3x 9 min (52 min)',
       description:
         'Naprzemienna praca 2 min pod progiem (92% FTP) i 1 min nad progiem (105% FTP) trenująca transportery MCT1/MCT4 do utylizacji mleczanu jako paliwa.',
       category: 'Threshold',
@@ -692,7 +740,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n3x\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 4m 55% 85rpm\n- 3m ramp 58-40% 80rpm`
+        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n3x\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 4m 55% 85rpm\n\n- 3m ramp 58-40% 80rpm`
       ),
     },
     {
@@ -707,7 +755,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 45-80% 90rpm\n4x\n- 8m 99% 94rpm\n- 3m 55% 85rpm\n- 3m ramp 60-40% 80rpm`
+        `- 8m ramp 45-80% 90rpm\n4x\n- 8m 99% 94rpm\n- 3m 55% 85rpm\n\n- 3m ramp 60-40% 80rpm`
       ),
     },
     {
@@ -817,13 +865,13 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 48-78% 90rpm\n- 2m 55% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n- 5m 52% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n- 5m ramp 60-40% 80rpm`
+        `- 8m ramp 48-78% 90rpm\n- 2m 55% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n\n- 5m 52% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n\n- 5m ramp 60-40% 80rpm`
       ),
     },
     {
       id: 'w_vo2_seiler_4x4',
       profileId: 'shared',
-      name: 'Protokół Seilera 4x 4 min VO2max (45 min)',
+      name: 'Protokół Seilera 4x 4 min VO2max (43 min)',
       description:
         'Klasyczny norweski interwał tlenowy dr. Stephena Seilera: 4x 4 minuty @ 112% FTP z 3-minutowym aktywnym wypoczynkiem maksymalizujący objętość wyrzutową serca.',
       category: 'VO2Max',
@@ -832,13 +880,13 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n4x\n- 4m 112% 96rpm\n- 3m 52% 85rpm\n- 5m ramp 60-40% 80rpm`
+        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n4x\n- 4m 112% 96rpm\n- 3m 52% 85rpm\n\n- 5m ramp 60-40% 80rpm`
       ),
     },
     {
       id: 'w_vo2_30_30',
       profileId: 'shared',
-      name: 'Interwały VO2max Billat 6x 2 min (42 min)',
+      name: 'Interwały VO2max Billat 6x 2 min (39 min)',
       description:
         'Sześć dynamicznych 2-minutowych powtórzeń na 116% FTP według koncepcji Véronique Billat (czas na vVO2max) z pełnym 2-minutowym odpoczynkiem.',
       category: 'VO2Max',
@@ -847,22 +895,22 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 50-80% 90rpm\n- 2m 55% 85rpm\n6x\n- 2m 116% 96rpm\n- 2m 52% 85rpm\n- 5m ramp 62-40% 80rpm`
+        `- 8m ramp 50-80% 90rpm\n- 2m 55% 85rpm\n6x\n- 2m 116% 96rpm\n- 2m 52% 85rpm\n\n- 5m ramp 62-40% 80rpm`
       ),
     },
     {
       id: 'w_vo2_pyramid_40',
       profileId: 'shared',
-      name: 'Schodkowa Piramida VO2max 3m-2m-1m (40 min)',
+      name: 'Schodkowa Piramida VO2max 3m-2m-1m + Tlen Z2 (52 min)',
       description:
-        'Dwie serie schodkowe o malejącym czasie i rosnącej mocy (3m @ 110% -> 2m @ 118% -> 1m @ 126% FTP) angażujące pułap tlenowy i pojemność beztlenową.',
+        'Dwie serie schodkowe o malejącym czasie i rosnącej mocy (3m @ 110% -> 2m @ 118% -> 1m @ 126% FTP) domknięte 14-minutowym blokiem tlenowym Z2.',
       category: 'VO2Max',
-      tags: ['VO2max'],
+      tags: ['VO2max', 'Endurance'],
       scheduledDate: today,
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 7m ramp 48-78% 90rpm\n2x\n- 3m 110% 95rpm\n- 2m 52% 85rpm\n- 2m 118% 98rpm\n- 2m 52% 85rpm\n- 1m 126% 100rpm\n- 3m 50% 85rpm\n- 5m ramp 60-40% 80rpm`
+        `- 7m ramp 48-78% 90rpm\n2x\n- 3m 110% 95rpm\n- 2m 52% 85rpm\n- 2m 118% 98rpm\n- 2m 52% 85rpm\n- 1m 126% 100rpm\n- 3m 50% 85rpm\n\n- 14m 65% 90rpm\n- 5m ramp 60-40% 80rpm`
       ),
     },
 
@@ -918,7 +966,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
     {
       id: 'w_test_ftp_20min_coggan',
       profileId: 'shared',
-      name: 'Klasyczny Test FTP 20 Minut (Protokół Coggana / Allena) (45 min)',
+      name: 'Klasyczny Test FTP 20 Minut (Protokół Coggana / Allena) (47 min)',
       description:
         'Pełny protokół Huntera Allena i dr. Andrew Coggana: rozgrzewka, 3 pobudzenia, 5 min przepalenia (110% FTP) redukującego udział beztlenowy W\' oraz 20 min próby czasowej (FTP = 95% średniej z 20 min).',
       category: 'RampTest',
@@ -926,7 +974,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 45-70% 90rpm\n3x\n- 1m 95% 100rpm\n- 1m 55% 85rpm\n- 3m 55% 85rpm\n- 5m 110% 95rpm\n- 5m 50% 85rpm\n- 20m ramp 98-105% 94rpm\n- 5m ramp 55-40% 80rpm`
+        `- 8m ramp 45-70% 90rpm\n3x\n- 1m 95% 100rpm\n- 1m 55% 85rpm\n\n- 3m 55% 85rpm\n- 5m 110% 95rpm\n- 5m 50% 85rpm\n- 20m ramp 98-105% 94rpm\n- 5m ramp 55-40% 80rpm`
       ),
     },
     {
@@ -1021,7 +1069,7 @@ export function getInitialWorkouts(): StructuredWorkout[] {
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 45-62% 88rpm\n3x\n- 30s 105% 100rpm\n- 3m30s 52% 85rpm\n- 10m ramp 55-40% 82rpm`
+        `- 8m ramp 45-62% 88rpm\n3x\n- 30s 105% 100rpm\n- 3m30s 52% 85rpm\n\n- 10m ramp 55-40% 82rpm`
       ),
     },
   ];
@@ -1029,7 +1077,8 @@ export function getInitialWorkouts(): StructuredWorkout[] {
 
 /**
  * Merges any missing initial scientific workouts into an existing workout list and ensures
- * every workout has normalized `tags: string[]` without ever deleting or overwriting user workouts.
+ * every built-in workout has its accurate blocks (fixing any previously inflated repeat blocks)
+ * without deleting or overwriting user-created workouts.
  */
 export function mergeAndNormalizeWorkoutsLibrary(
   existingWorkouts: StructuredWorkout[]
@@ -1049,6 +1098,8 @@ export function mergeAndNormalizeWorkoutsLibrary(
         : defaultMatch?.tags || inferWorkoutTags(w);
     resultMap.set(w.id, {
       ...w,
+      name: defaultMatch ? defaultMatch.name : w.name,
+      blocks: defaultMatch ? defaultMatch.blocks : w.blocks,
       tags: normalizedTags,
     });
   }

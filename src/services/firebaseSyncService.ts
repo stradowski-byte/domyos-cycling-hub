@@ -15,7 +15,9 @@ import {
   handleFirestoreError,
   OperationType,
   KNOWN_RIDERS_STORAGE_KEY,
+  saveCustomGitHubPagesUrl,
 } from '../lib/firebase';
+import { recordPrivateAuditLog } from './securityAndAuditLogger';
 import {
   AthleteProfile,
   CompletedActivity,
@@ -138,7 +140,12 @@ export async function flushOfflineSyncQueueWithBatch(): Promise<number> {
     saveOfflineSyncQueue([]);
     return flushedCount;
   } catch (err) {
-    console.warn('Batch flush of offline sync queue deferred:', err);
+    recordPrivateAuditLog(
+      'WARN',
+      'FIRESTORE',
+      'Wstrzymano opróżnianie kolejki Offline Sync (oczekiwanie na połączenie)',
+      err instanceof Error ? err.message : String(err)
+    );
     return flushedCount;
   }
 }
@@ -572,7 +579,12 @@ export async function ensureFirestoreCollectionsInitialized(params: {
       mergedWorkouts: fullNormalizedLibrary,
     };
   } catch (err) {
-    console.warn('Firestore collection bootstrap warning:', err);
+    recordPrivateAuditLog(
+      'WARN',
+      'FIRESTORE',
+      'Ostrzeżenie podczas inicjalizacji kolekcji Firestore',
+      err instanceof Error ? err.message : String(err)
+    );
     return {
       initializedCollections,
       mergedTags: normalizeTagList(params.tags),
@@ -582,8 +594,10 @@ export async function ensureFirestoreCollectionsInitialized(params: {
 }
 
 export async function saveProfileToFirestore(profile: AthleteProfile): Promise<void> {
+  const activeUid = profile.uid || auth?.currentUser?.uid;
   const payload = sanitizeForFirestore({
     ...profile,
+    ...(activeUid ? { uid: activeUid, ownerUid: activeUid } : {}),
     updatedAtIso: new Date().toISOString(),
   }) as unknown as Record<string, unknown>;
 
@@ -664,10 +678,17 @@ export async function savePlannedWorkoutToFirestore(
   workout: StructuredWorkout
 ): Promise<void> {
   const normalizedTags = inferWorkoutTags(workout);
+  const currentUid = auth?.currentUser?.uid;
+  const resolvedOwnerUid =
+    currentUid ||
+    (workout.ownerUid && workout.ownerUid !== 'offline_user'
+      ? workout.ownerUid
+      : undefined);
+
   const payload = sanitizeForFirestore({
     ...workout,
     tags: normalizedTags,
-    ownerUid: workout.ownerUid || auth?.currentUser?.uid || 'offline_user',
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid, uid: resolvedOwnerUid } : {}),
     updatedAtIso: new Date().toISOString(),
   }) as unknown as Record<string, unknown>;
 
@@ -738,10 +759,17 @@ export async function saveCompletedActivityToFirestore(
   const hydrated = await ensureActivityHasRecords(activity);
   const fitBase64 = activity.fitBase64 || encodeActivityToFitBase64(hydrated);
   const compactRecords = downsampleRecordsForFirestore(hydrated.records, 360);
+  const currentUid = auth?.currentUser?.uid;
+  const resolvedOwnerUid =
+    currentUid ||
+    (hydrated.ownerUid && hydrated.ownerUid !== 'offline_user'
+      ? hydrated.ownerUid
+      : undefined);
 
   const firestoreDoc: CompletedActivity = sanitizeForFirestore({
     ...hydrated,
-    ownerUid: hydrated.ownerUid || auth?.currentUser?.uid || 'offline_user',
+    ownerUid: resolvedOwnerUid || 'offline_user',
+    ...(resolvedOwnerUid ? { uid: resolvedOwnerUid } : {}),
     ownerEmail: hydrated.ownerEmail || auth?.currentUser?.email || '',
     records: compactRecords,
     fitBase64,
@@ -802,10 +830,13 @@ export async function syncAllStateToFirestore(params: {
   const batch = writeBatch(db);
   let profilesCount = 0;
   for (const prof of Object.values(params.profiles)) {
+    const activeUid = prof.uid || auth.currentUser.uid;
     batch.set(
       doc(db, 'profiles', prof.id),
       sanitizeForFirestore({
         ...prof,
+        uid: activeUid,
+        ownerUid: activeUid,
         updatedAtIso: new Date().toISOString(),
       }),
       { merge: true }
@@ -821,7 +852,8 @@ export async function syncAllStateToFirestore(params: {
       sanitizeForFirestore({
         ...w,
         tags: normalizedTags,
-        ownerUid: w.ownerUid || auth.currentUser.uid,
+        ownerUid: auth.currentUser.uid,
+        uid: auth.currentUser.uid,
         updatedAtIso: new Date().toISOString(),
       }),
       { merge: true }
@@ -844,7 +876,8 @@ export async function syncAllStateToFirestore(params: {
       const compactRecords = downsampleRecordsForFirestore(hydrated.records, 360);
       const firestoreDoc: CompletedActivity = sanitizeForFirestore({
         ...hydrated,
-        ownerUid: hydrated.ownerUid || auth.currentUser.uid,
+        ownerUid: auth.currentUser.uid,
+        ...(auth.currentUser.uid ? { uid: auth.currentUser.uid } : {}),
         ownerEmail: hydrated.ownerEmail || auth.currentUser.email || '',
         records: compactRecords,
         fitBase64,
@@ -957,6 +990,12 @@ export function subscribeToFirestoreHub(callbacks: {
         if (Array.isArray(data?.workoutTags)) {
           const normalized = saveWorkoutTagsLocally(data.workoutTags);
           callbacks.onTagsSnapshot?.(normalized);
+        }
+        if (
+          typeof data?.ghPagesInstallUrl === 'string' &&
+          data.ghPagesInstallUrl.startsWith('http')
+        ) {
+          saveCustomGitHubPagesUrl(data.ghPagesInstallUrl);
         }
       }
     },

@@ -56,6 +56,7 @@ import {
   signOutGoogleRider,
   subscribeToGoogleAuth,
 } from './lib/firebase';
+import { recordPrivateAuditLog } from './services/securityAndAuditLogger';
 import {
   deletePlannedWorkoutFromFirestore,
   deleteWorkoutTxtFromLocalOpfs,
@@ -781,7 +782,12 @@ export default function App() {
           `Zapisano trening i binarny plik .FIT w centralnej bazie Firebase Cloud Firestore oraz w OPFS!`
         );
       } catch (err) {
-        console.warn('Firebase upload queued to offline pending sync:', err);
+        recordPrivateAuditLog(
+          'WARN',
+          'FIRESTORE',
+          'Trening .FIT zapisany lokalnie w OPFS i dodany do kolejki Pending Sync dla Firebase',
+          err instanceof Error ? err.message : String(err)
+        );
         showToast(
           `Zapisano .FIT w OPFS! Trening dodano do kolejki Pending Sync dla Firebase.`
         );

@@ -51,9 +51,12 @@ import {
   DEFAULT_WORKOUT_TAGS,
   inferWorkoutTags,
 } from '../services/rampAndPhysiologyEngine';
+import { doc, setDoc } from 'firebase/firestore';
 import {
   activeConfig,
+  auth,
   clearCustomFirebaseConfig,
+  db,
   DEFAULT_GITHUB_PAGES_URL,
   DEFAULT_GITHUB_REPO_URL,
   FIREBASE_CONSOLE_PLACEHOLDER,
@@ -63,6 +66,8 @@ import {
   saveCustomFirebaseConfig,
   saveCustomGitHubPagesUrl,
 } from '../lib/firebase';
+import { FirebaseSetupGuideDropdown } from './FirebaseSetupGuideDropdown';
+import { SecurityAuditAndLogsPanel } from './SecurityAuditAndLogsPanel';
 
 interface ProfilesAndCloudSettingsViewProps {
   profiles: Record<ProfileId, AthleteProfile>;
@@ -152,7 +157,19 @@ export const ProfilesAndCloudSettingsView: React.FC<
     const saved = saveCustomGitHubPagesUrl(ghPagesUrl);
     setGhPagesUrl(saved);
     setIsEditingGhPagesUrl(false);
-    onNotifyToast?.('Zapisano adres GitHub Pages do instalacji PWA.');
+    if (db && auth?.currentUser) {
+      void setDoc(
+        doc(db, 'hubConfig', 'default'),
+        {
+          updatedAtIso: new Date().toISOString(),
+          ghPagesInstallUrl: saved,
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
+    onNotifyToast?.(
+      'Zapisano adres GitHub Pages w pamięci telefonu oraz w chmurze Firebase!'
+    );
   };
 
   const sparkStorage = estimateFirestoreSparkStorage({
@@ -585,7 +602,18 @@ export const ProfilesAndCloudSettingsView: React.FC<
             </button>
           </div>
         </div>
+
+        {/* Collapsible Step-by-Step Firebase & Security Rules Guide Dropdown */}
+        <FirebaseSetupGuideDropdown
+          defaultOpen={false}
+          onNotifyToast={onNotifyToast}
+        />
       </div>
+
+      {/* =====================================================================
+          1A. ZERO-LEAK SECURITY AUDIT & PRIVATE OPFS / FIREBASE LOGS PANEL
+         ===================================================================== */}
+      <SecurityAuditAndLogsPanel onNotifyToast={onNotifyToast} />
 
       {/* =====================================================================
           1B. WORKOUT TAGS & CATEGORIES MANAGER (CREATES DROPDOWNS ON MAIN VIEW)

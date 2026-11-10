@@ -1,5 +1,6 @@
 import { CompletedActivity } from '../types/cycling';
 import { getCachedGoogleFitToken, signInRiderWithGoogle } from '../lib/firebase';
+import { recordPrivateAuditLog } from './securityAndAuditLogger';
 
 const FITNESS_API_BASE = 'https://www.googleapis.com/fitness/v1/users/me';
 
@@ -148,7 +149,12 @@ export async function uploadActivityToGoogleFit(
           }
         );
       } catch (e) {
-        console.warn('Google Fit HR dataset warning:', e);
+        recordPrivateAuditLog(
+          'WARN',
+          'GOOGLE_FIT',
+          'Ostrzeżenie podczas zapisu strumienia tętna HR do Google Fit',
+          e instanceof Error ? e.message : String(e)
+        );
       }
     }
 
@@ -200,7 +206,12 @@ export async function uploadActivityToGoogleFit(
           }
         );
       } catch (e) {
-        console.warn('Google Fit Power dataset warning:', e);
+        recordPrivateAuditLog(
+          'WARN',
+          'GOOGLE_FIT',
+          'Ostrzeżenie podczas zapisu strumienia mocy (W) do Google Fit',
+          e instanceof Error ? e.message : String(e)
+        );
       }
     }
 

@@ -19,11 +19,13 @@ import {
   clearCustomFirebaseConfig,
   FIREBASE_CONSOLE_PLACEHOLDER,
   formatFirebaseConfigText,
+  getGitHubPagesInstallUrl,
   isAIStudioPreviewEnvironment,
   isConfigured,
   isUsingCustomConfig,
   saveCustomFirebaseConfig,
 } from '../lib/firebase';
+import { FirebaseSetupGuideDropdown } from './FirebaseSetupGuideDropdown';
 
 interface PwaAndAuthGateScreenProps {
   isPwaInstalled: boolean;
@@ -201,19 +203,19 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
             <div className="rounded-2xl bg-[#0B0F17] border border-sky-500/40 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
               <div className="min-w-0">
                 <div className="text-[11px] text-slate-400">
-                  Oficjalny adres instalacji aplikacji (GitHub Pages):
+                  Adres instalacji aplikacji (GitHub Pages):
                 </div>
                 <a
-                  href="https://stradowski-by.github.io/domyos-cycling-hub/"
+                  href={getGitHubPagesInstallUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-mono-tabular font-bold text-emerald-400 hover:underline break-all"
                 >
-                  https://stradowski-by.github.io/domyos-cycling-hub/
+                  {getGitHubPagesInstallUrl()}
                 </a>
               </div>
               <a
-                href="https://stradowski-by.github.io/domyos-cycling-hub/"
+                href={getGitHubPagesInstallUrl()}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="min-h-[38px] px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-colors"
@@ -372,6 +374,11 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Collapsible Step-by-Step Firebase & Security Rules Guide Dropdown */}
+            <div className="pt-2">
+              <FirebaseSetupGuideDropdown defaultOpen={false} />
+            </div>
           </form>
         )}
 
@@ -387,20 +394,20 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
                 </div>
                 <div className="space-y-1 min-w-0">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-[11px] font-bold text-emerald-300">
-                    KROK 3 Z 3 · AUTORYZACJA GOOGLE OAUTH
+                    KROK 3 Z 3 · AUTORYZACJA GOOGLE OAUTH (ZERO ANONIMÓW)
                   </div>
                   <h2 className="text-lg sm:text-xl font-bold text-white">
                     Zaloguj się kontem Google, aby aktywować profil
                   </h2>
                   <p className="text-xs text-slate-300 leading-relaxed">
                     W aplikacji nie istnieją żadne profile domyślne ani
-                    anonimowe. Każde zalogowane konto Google automatycznie
-                    tworzy lub wczytuje swój profil z bazy{' '}
+                    anonimowe. Dostęp do bazy{' '}
                     <strong className="text-emerald-400">
                       {activeConfig?.projectId}
                     </strong>{' '}
-                    oraz aktywuje eksport do{' '}
-                    <strong className="text-rose-400">Google Fit</strong>.
+                    jest otwarty wyłącznie wtedy, gdy na urządzeniu załadowano
+                    właściwy <code>firebaseConfig</code> i zalogowano
+                    zweryfikowanym kontem Google OAuth.
                   </p>
                 </div>
               </div>
@@ -483,6 +490,9 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Collapsible Step-by-Step Firebase & Security Rules Guide Dropdown */}
+            <FirebaseSetupGuideDropdown defaultOpen={false} />
 
             {/* Footer Controls to Inspect/Change Device Firebase Config */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800 text-xs text-slate-400">

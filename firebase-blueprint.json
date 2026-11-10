@@ -90,6 +90,23 @@
         "syncedToGoogleFit": { "type": "boolean" }
       },
       "required": ["id", "profileId", "workoutName", "startedAtIso", "durationSec"]
+    },
+    "SecurityAuditLog": {
+      "title": "SecurityAuditLog",
+      "description": "Private diagnostic and security audit log entry synchronized between local device OPFS/localStorage and Firebase Firestore (replacing console logs).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "timestampIso": { "type": "string" },
+        "level": { "type": "string" },
+        "category": { "type": "string" },
+        "message": { "type": "string" },
+        "context": { "type": "string" },
+        "deviceFingerprint": { "type": "string" }
+      },
+      "required": ["id", "timestampIso", "level", "category", "message"]
     }
   },
   "firestore": {
@@ -108,6 +125,10 @@
     "/completedWorkouts/{activityId}": {
       "schema": { "$ref": "#/entities/CompletedActivity" },
       "description": "Completed workouts with telemetry and Base64 .FIT files"
+    },
+    "/securityAuditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SecurityAuditLog" },
+      "description": "Private user-isolated diagnostic and security audit logs"
     }
   }
 }

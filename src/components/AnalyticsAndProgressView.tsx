@@ -927,7 +927,7 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
 
             <svg
               viewBox={`0 0 ${chartW} ${chartH}`}
-              className="w-full h-44 rounded-xl bg-[#0B0F17] border border-slate-800/90"
+              className="workout-chart-surface w-full h-44 rounded-xl bg-[#0F172A] border border-slate-700"
               preserveAspectRatio="none"
             >
               {[0.25, 0.5, 0.75].map((r) => (

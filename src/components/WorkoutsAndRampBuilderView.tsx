@@ -39,6 +39,7 @@ import {
 } from '../services/rampAndPhysiologyEngine';
 import { WorkoutProfileChart } from './WorkoutProfileChart';
 import { formatDurationClock } from './LiveCockpitView';
+import { recordPrivateAuditLog } from '../services/securityAndAuditLogger';
 
 interface WorkoutsAndRampBuilderViewProps {
   activeProfile: AthleteProfile;
@@ -200,8 +201,8 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
           w.blocks.reduce((acc, b) => acc + b.durationSec, 0) / 60
         );
         if (durationFilter === 'short' && totalMin > 38) return false;
-        if (durationFilter === 'medium' && (totalMin < 39 || totalMin > 62)) return false;
-        if (durationFilter === 'long' && totalMin <= 62) return false;
+        if (durationFilter === 'medium' && (totalMin < 39 || totalMin > 56)) return false;
+        if (durationFilter === 'long' && totalMin <= 56) return false;
       }
 
       if (q) {
@@ -214,44 +215,131 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
     });
   }, [workouts, filterScope, durationFilter, searchQuery, activeProfile.offlineMode]);
 
-  // Smart Daily Workout Recommendation based on TSB (freshness) and recent ride
-  const smartDailyRecommendation = useMemo(() => {
+  // Dual Smart Daily Workout Recommendations (Short 30-45 min + Standard/Long 50-75 min, max 1h 20m)
+  const smartDailyRecommendations = useMemo(() => {
     if (workouts.length === 0) return null;
+
+    const getDurSec = (w: StructuredWorkout) =>
+      w.blocks.reduce((sum, b) => sum + b.durationSec, 0);
+
+    // Strictly cap indoor recommendations to <= 85 min (5100s) so no >1h30m ride is ever proposed
+    const indoorWorkouts = workouts.filter((w) => {
+      const sec = getDurSec(w);
+      return sec >= 1500 && sec <= 5100;
+    });
+    const pool = indoorWorkouts.length > 0 ? indoorWorkouts : workouts;
+
     const hoursSinceLastRide = lastCompletedActivity
       ? (Date.now() - new Date(lastCompletedActivity.startedAtIso).getTime()) / 3600000
       : 999;
     const hadHardRideRecently =
       hoursSinceLastRide < 26 && (lastCompletedActivity?.tss || 0) >= 75;
 
-    let preferredId = 'w_thresh_ss_3x10';
-    let reason = `Optymalny bodziec tlenowo-progowy (Forma TSB ${latestTsb >= 0 ? `+${latestTsb}` : latestTsb})`;
+    let readinessSummary = `Optymalna gotowość treningowa (Forma TSB ${
+      latestTsb >= 0 ? `+${latestTsb}` : latestTsb
+    }) — wybierz wariant krótki (30–45 min) lub pełny domowy (50–75 min, maks. 1h 20m).`;
+
+    let shortPreferredIds = [
+      'w_ramp_sweetspot',
+      'w_over_under_crisscross',
+      'w_cardio_fatburn_z2',
+    ];
+    let standardPreferredIds = [
+      'w_sweetspot_3x10',
+      'w_sweetspot_endurance_65',
+      'w_z2_endurance_75',
+    ];
+    let shortSubtitle = 'Skondensowany bodziec Sweet Spot / FTP na dni z mniejszą ilością czasu';
+    let standardSubtitle = 'Pełna jednostka domowa (54–75 min) budująca próg FTP i wytrzymałość';
 
     if (latestTsb < -12 || hadHardRideRecently) {
-      preferredId = 'w_rec_flush_35';
-      reason = hadHardRideRecently
-        ? `Po mocnym treningu (${lastCompletedActivity?.tss} TSS) zalecana aktywna regeneracja Z1/Z2`
-        : `Wysokie zmęczenie (TSB ${latestTsb}) — dzisiaj lekki rozjazd regeneracyjny`;
+      readinessSummary = hadHardRideRecently
+        ? `Po wczorajszym mocnym akcencie (${lastCompletedActivity?.tss} TSS) zalecany rozjazd lub spokojny tlen Z1/Z2.`
+        : `Wysokie zmęczenie kumulacyjne (TSB ${latestTsb}) — dzisiaj regeneracja lub lekka baza tlenowa.`;
+      shortPreferredIds = [
+        'w_recovery_active_spin_30',
+        'w_recovery_openers_25',
+        'w_cardio_fatburn_z2',
+      ];
+      standardPreferredIds = [
+        'w_z2_steady_45',
+        'w_z2_cadence_drills_50',
+        'w_z2_wave_endurance_60',
+      ];
+      shortSubtitle = 'Szybki rozjazd regeneracyjny Z1/Z2 (30 min) przyspieszający wypłukiwanie mleczanu';
+      standardSubtitle = 'Spokojna sesja tlenowa Z2 (45–50 min) bez obciążania układu nerwowego';
     } else if (latestTsb < -3) {
-      preferredId = 'w_z2_steady_60';
-      reason = `Budowa bazy tlenowej Z2 przy umiarkowanym zmęczeniu (TSB ${latestTsb})`;
+      readinessSummary = `Umiarkowane obciążenie treningowe (TSB ${latestTsb}) — najlepszy moment na budowę bazy tlenowej Z2 i ekonomii kadencji.`;
+      shortPreferredIds = [
+        'w_cardio_fatburn_z2',
+        'w_z2_steady_45',
+        'w_ramp_sweetspot',
+      ];
+      standardPreferredIds = [
+        'w_z2_wave_endurance_60',
+        'w_z2_endurance_75',
+        'w_sweetspot_endurance_65',
+      ];
+      shortSubtitle = 'Zwinna sesja tlenowa FatMax Z2 (40–45 min) przed pracą lub wieczorem';
+      standardSubtitle = 'Klasyczna sesja wytrzymałościowa 1h 00m – 1h 15m w strefie Z2/Z3';
     } else if (latestTsb >= 6) {
-      preferredId = 'w_vo2_ronnestad_30_15';
-      reason = `Wysoka świeżość (TSB +${latestTsb}) — idealny dzień na interwały VO2max lub Sweet Spot`;
+      readinessSummary = `Wysoka świeżość (TSB +${latestTsb}) — idealny dzień na bodziec VO2max lub rozbudowany trening Sweet Spot / Próg!`;
+      shortPreferredIds = [
+        'w_vo2_ronnestad_30_15',
+        'w_vo2_seiler_4x4',
+        'w_vo2_billat_30_30',
+      ];
+      standardPreferredIds = [
+        'w_sweetspot_endurance_65',
+        'w_vo2_pyramid_40',
+        'w_sweetspot_3x10',
+      ];
+      shortSubtitle = 'Intensywny protokół interwałowy VO2max (35–43 min) o maksymalnej efektywności czasowej';
+      standardSubtitle = 'Rozbudowana jednostka jakościowa (52–65 min) łącząca interwały z bazą tlenową';
     }
 
-    const found =
-      workouts.find((w) => w.id === preferredId) ||
-      workouts.find((w) => w.id === selectedWorkoutId) ||
-      workouts[0];
-
-    const totalSec = found.blocks.reduce((sum, b) => sum + b.durationSec, 0);
-    return {
-      workout: found,
-      reason,
-      totalSec,
-      tags: inferWorkoutTags(found),
+    const pickWorkout = (
+      preferredIds: string[],
+      minSec: number,
+      maxSec: number,
+      excludeId?: string
+    ): StructuredWorkout => {
+      for (const id of preferredIds) {
+        const match = pool.find((w) => w.id === id && w.id !== excludeId);
+        if (match) return match;
+      }
+      const byRange = pool.find((w) => {
+        const s = getDurSec(w);
+        return w.id !== excludeId && s >= minSec && s <= maxSec;
+      });
+      if (byRange) return byRange;
+      return pool.find((w) => w.id !== excludeId) || pool[0];
     };
-  }, [workouts, latestTsb, lastCompletedActivity, selectedWorkoutId]);
+
+    const shortWorkout = pickWorkout(shortPreferredIds, 1500, 2760);
+    const standardWorkout = pickWorkout(
+      standardPreferredIds,
+      2800,
+      4800,
+      shortWorkout.id
+    );
+
+    return {
+      readinessSummary,
+      shortOption: {
+        workout: shortWorkout,
+        subtitle: shortSubtitle,
+        totalSec: getDurSec(shortWorkout),
+        tags: inferWorkoutTags(shortWorkout),
+      },
+      standardOption: {
+        workout: standardWorkout,
+        subtitle: standardSubtitle,
+        totalSec: getDurSec(standardWorkout),
+        tags: inferWorkoutTags(standardWorkout),
+      },
+    };
+  }, [workouts, latestTsb, lastCompletedActivity]);
 
   // Group workouts by tag (a workout with multiple tags appears in each matching category)
   const categorizedWorkouts = useMemo(() => {
@@ -475,7 +563,12 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
         const parsedWorkout = parseIcuTextFileToWorkout(text, file.name, 'shared');
         onSaveWorkout(parsedWorkout);
       } catch (err) {
-        console.warn('Nie udało się wczytać pliku .txt:', file.name, err);
+        recordPrivateAuditLog(
+          'WARN',
+          'OPFS_STORAGE',
+          `Nie udało się wczytać pliku treningowego .txt: ${file.name}`,
+          err instanceof Error ? err.message : String(err)
+        );
       }
     }
     e.target.value = '';
@@ -483,39 +576,120 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
 
   return (
     <div className="space-y-4 pb-8 min-w-0 max-w-full overflow-x-hidden">
-      {/* SMART DAILY RECOMMENDATION CARD (1-CLICK START) */}
-      {smartDailyRecommendation && (
-        <div className="rounded-2xl bg-gradient-to-r from-emerald-500/15 via-[#131B26] to-[#131B26] border border-emerald-500/40 p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
-          <div className="space-y-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-emerald-400">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
-                <Sparkles className="w-3 h-3 shrink-0" />
-                Polecany Trening na Dziś
+      {/* DUAL SMART DAILY RECOMMENDATION CARDS (SHORT 30-45 MIN & STANDARD 50-75 MIN, MAX 1H 20M) */}
+      {smartDailyRecommendations && (
+        <div className="rounded-2xl bg-[#131B26] border-2 border-emerald-500/60 p-3.5 sm:p-4 space-y-3 min-w-0 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-emerald-400">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                Propozycja Treningu na Dziś (2 Warianty Czasowe)
               </span>
-              <span className="font-mono-tabular text-slate-300">
-                {formatDurationClock(smartDailyRecommendation.totalSec)} ·{' '}
-                {smartDailyRecommendation.tags.join(' / ')}
+              <span className="text-[11px] font-normal text-slate-300">
+                {smartDailyRecommendations.readinessSummary}
               </span>
             </div>
-            <div className="text-sm sm:text-base font-bold text-white truncate">
-              {smartDailyRecommendation.workout.name}
-            </div>
-            <p className="text-xs text-slate-300 break-words">
-              {smartDailyRecommendation.reason}
-            </p>
+            <span className="text-[11px] font-mono-tabular font-semibold text-slate-400 shrink-0">
+              Limit domowy: maks. 1h 20m
+            </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() =>
-                onSelectAndLoadWorkout(smartDailyRecommendation.workout, true)
-              }
-              className="w-full md:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
-            >
-              <Play className="w-4 h-4 fill-current shrink-0" />
-              <span>Jedź Teraz ({activeProfile.ftpWatts}W FTP)</span>
-            </button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* OPTION 1: SHORT / TIME-CRUNCHED WORKOUT (30-45 MIN) */}
+            <div className="rounded-xl bg-[#0B0F17] border border-emerald-500/40 p-3.5 flex flex-col justify-between gap-3 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 font-bold text-emerald-300">
+                    WARIANT 1 · KRÓTKI (30–45 MIN)
+                  </span>
+                  <span className="font-mono-tabular font-bold text-emerald-400">
+                    {formatDurationClock(
+                      smartDailyRecommendations.shortOption.totalSec
+                    )}{' '}
+                    ·{' '}
+                    {smartDailyRecommendations.shortOption.tags
+                      .slice(0, 2)
+                      .join(' / ')}
+                  </span>
+                </div>
+                <div className="text-sm font-bold text-white break-words">
+                  {smartDailyRecommendations.shortOption.workout.name}
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed break-words">
+                  {smartDailyRecommendations.shortOption.subtitle}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectAndLoadWorkout(
+                      smartDailyRecommendations.shortOption.workout,
+                      true
+                    )
+                  }
+                  className="w-full min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current shrink-0" />
+                  <span>
+                    Jedź Krótki (
+                    {Math.round(
+                      smartDailyRecommendations.shortOption.totalSec / 60
+                    )}{' '}
+                    min · {activeProfile.ftpWatts}W FTP)
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* OPTION 2: STANDARD / LONGER INDOOR WORKOUT (50-75 MIN, MAX 1H 20M) */}
+            <div className="rounded-xl bg-[#0B0F17] border border-sky-500/40 p-3.5 flex flex-col justify-between gap-3 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-500/40 font-bold text-sky-300">
+                    WARIANT 2 · STANDARDOWY / DŁUŻSZY (50–75 MIN)
+                  </span>
+                  <span className="font-mono-tabular font-bold text-sky-400">
+                    {formatDurationClock(
+                      smartDailyRecommendations.standardOption.totalSec
+                    )}{' '}
+                    ·{' '}
+                    {smartDailyRecommendations.standardOption.tags
+                      .slice(0, 2)
+                      .join(' / ')}
+                  </span>
+                </div>
+                <div className="text-sm font-bold text-white break-words">
+                  {smartDailyRecommendations.standardOption.workout.name}
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed break-words">
+                  {smartDailyRecommendations.standardOption.subtitle}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectAndLoadWorkout(
+                      smartDailyRecommendations.standardOption.workout,
+                      true
+                    )
+                  }
+                  className="w-full min-h-[40px] px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current shrink-0" />
+                  <span>
+                    Jedź Dłuższy (
+                    {Math.round(
+                      smartDailyRecommendations.standardOption.totalSec / 60
+                    )}{' '}
+                    min · {activeProfile.ftpWatts}W FTP)
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -623,7 +797,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
           </div>
         </div>
 
-        {/* Quick Duration Filter Pills (All / <= 35m / 40-60m / > 60m) */}
+        {/* Quick Duration Filter Pills (All / <= 35m / 40-55m / 60-80m) */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
@@ -633,9 +807,9 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
             {(
               [
                 { id: 'all', label: 'Dowolny czas' },
-                { id: 'short', label: '≤ 35 min (Szybki)' },
-                { id: 'medium', label: '40–60 min (Standard)' },
-                { id: 'long', label: '> 60 min (Długi)' },
+                { id: 'short', label: '≤ 38 min (Krótki)' },
+                { id: 'medium', label: '40–55 min (Standard)' },
+                { id: 'long', label: '60–80 min (Dłuższy do 1h 20m)' },
               ] as const
             ).map((opt) => (
               <button

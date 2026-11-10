@@ -1,4 +1,5 @@
 import { ControlMode, LiveBikeTelemetry } from '../types/cycling';
+import { recordPrivateAuditLog } from './securityAndAuditLogger';
 
 const FTMS_SERVICE_UUID = 0x1826;
 const INDOOR_BIKE_DATA_UUID = 0x2ad2;
@@ -186,7 +187,12 @@ export class FtmsBikeController {
       await new Promise((r) => setTimeout(r, 180));
       await this.writeControlPoint(new Uint8Array([0x07]));
     } catch (cpErr) {
-      console.warn('Control point setup warning:', cpErr);
+      recordPrivateAuditLog(
+        'WARN',
+        'BLE_FTMS',
+        'Ostrzeżenie inicjalizacji punktu kontrolnego FTMS 0x2AD9',
+        cpErr instanceof Error ? cpErr.message : String(cpErr)
+      );
     }
 
     this.state.connected = true;
@@ -232,7 +238,12 @@ export class FtmsBikeController {
       try {
         await this.setupFtmsGattServices(this.bleDevice);
       } catch (err) {
-        console.warn(`BLE auto-reconnect attempt ${attempt} failed:`, err);
+        recordPrivateAuditLog(
+          'WARN',
+          'BLE_FTMS',
+          `Próba automatycznego wznowienia połączenia BLE (${attempt}) nie powiodła się`,
+          err instanceof Error ? err.message : String(err)
+        );
         this.scheduleAutoReconnect(attempt + 1);
       }
     }, delay);
@@ -545,7 +556,12 @@ export class FtmsBikeController {
         await this.controlPointChar.writeValue(bytes);
       }
     } catch (err) {
-      console.warn('FTMS write warning:', err);
+      recordPrivateAuditLog(
+        'WARN',
+        'BLE_FTMS',
+        'Ostrzeżenie zapisu komendy sterującej FTMS ERG/Opór',
+        err instanceof Error ? err.message : String(err)
+      );
     }
   }
 }
