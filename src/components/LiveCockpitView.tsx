@@ -14,6 +14,8 @@ import {
   AlertTriangle,
   Maximize2,
   Minimize2,
+  Heart,
+  Terminal,
 } from 'lucide-react';
 import {
   AthleteProfile,
@@ -27,6 +29,10 @@ import {
   getPowerZoneForWatts,
 } from '../services/rampAndPhysiologyEngine';
 import { WorkoutProfileChart } from './WorkoutProfileChart';
+import {
+  BlePacketSnifferModal,
+  getHrSourceBadgeInfo,
+} from './BlePacketSnifferModal';
 
 interface LiveCockpitViewProps {
   profile: AthleteProfile;
@@ -56,6 +62,9 @@ interface LiveCockpitViewProps {
   onConnectDomyos: () => void;
   onToggleSimulator: () => void;
   onConnectExternalPower: () => void;
+  onConnectExternalHrStrap?: () => Promise<void>;
+  onDisconnectExternalHrStrap?: () => void;
+  onNotifyToast?: (msg: string) => void;
   onBackToWorkouts?: () => void;
   onExtendCurrentBlockSec?: (deltaSec: number) => void;
   isFocusHudMode?: boolean;
@@ -100,12 +109,17 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
   onConnectDomyos,
   onToggleSimulator,
   onConnectExternalPower,
+  onConnectExternalHrStrap,
+  onDisconnectExternalHrStrap,
+  onNotifyToast,
   onBackToWorkouts,
   onExtendCurrentBlockSec,
   isFocusHudMode = false,
   onToggleFocusHudMode,
 }) => {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [isSnifferModalOpen, setIsSnifferModalOpen] = useState(false);
+  const hrSourceBadge = getHrSourceBadgeInfo(telemetry);
 
   const safeBlockIndex = Math.min(
     Math.max(0, currentBlockIndex),
@@ -327,6 +341,32 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
             <span className="hidden sm:inline">Symulator</span>
           </button>
 
+          {onConnectExternalHrStrap && (
+            <button
+              onClick={onConnectExternalHrStrap}
+              className={`min-h-[36px] px-2 sm:px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition-colors whitespace-nowrap ${
+                telemetry.externalHrConnected
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                  : 'bg-[#0B0F17] border-slate-700 text-rose-300 hover:text-white'
+              }`}
+              title="Sparuj pas tętna BLE (0x180D) bezpośrednio z telefonem"
+            >
+              <Heart className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden md:inline">
+                {telemetry.externalHrConnected ? 'Pas HR Aktywny' : '+ Pas HR'}
+              </span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setIsSnifferModalOpen(true)}
+            className="min-h-[36px] px-2 sm:px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center gap-1 whitespace-nowrap"
+            title="Otwórz Skaner Ramek BLE (HEX Sniffer) i Dekoder Tętna HR na żywo"
+          >
+            <Terminal className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">Sniffer BLE</span>
+          </button>
+
           <button
             onClick={onConnectExternalPower}
             className="min-h-[36px] px-2 py-1.5 rounded-lg bg-[#0B0F17] border border-slate-700 text-slate-300 hover:text-white text-[11px] flex items-center"
@@ -517,10 +557,21 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           </div>
         </div>
 
-        {/* FIELD 3: HEART RATE (BPM) + LIVE AEROBIC DECOUPLING (Pa:Hr %) */}
-        <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3.5 py-2 sm:py-2.5 flex flex-col justify-between min-w-0 overflow-hidden">
+        {/* FIELD 3: HEART RATE (BPM) + LIVE AEROBIC DECOUPLING (Pa:Hr %) + BLE SNIFFER TRIGGER */}
+        <div
+          onClick={() => setIsSnifferModalOpen(true)}
+          className="rounded-xl bg-[#131B26] border border-slate-800 hover:border-rose-500/40 px-2.5 sm:px-3.5 py-2 sm:py-2.5 flex flex-col justify-between min-w-0 overflow-hidden cursor-pointer transition-colors"
+          title="Stuknij, aby otworzyć Skaner Ramek BLE (HEX Sniffer) lub sparować pas tętna 0x180D"
+        >
           <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase min-w-0">
-            <span className="truncate">TĘTNO (HR)</span>
+            <span className="truncate flex items-center gap-1">
+              <span>TĘTNO (HR)</span>
+              <span
+                className={`px-1.5 py-0.2 rounded border text-[9px] font-mono-tabular ${hrSourceBadge.colorClass}`}
+              >
+                {hrSourceBadge.shortLabel}
+              </span>
+            </span>
             <span className="font-mono-tabular text-rose-400 shrink-0">
               {telemetry.heartRateBpm > 0
                 ? `${Math.round((telemetry.heartRateBpm / profile.maxHrBpm) * 100)}% MAX`
@@ -531,18 +582,22 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           <div className="my-auto py-0.5 flex items-baseline justify-between gap-1 min-w-0">
             <div className="flex items-baseline gap-1 min-w-0">
               <span className="font-mono-tabular text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-none truncate">
-                {telemetry.heartRateBpm || '--'}
+                {telemetry.heartRateBpm > 0 ? telemetry.heartRateBpm : '--'}
               </span>
               <span className="text-[11px] sm:text-xs font-bold text-rose-400 shrink-0">BPM</span>
             </div>
-            {livePaHrMetrics.decouplingPct !== null && (
+            {livePaHrMetrics.decouplingPct !== null ? (
               <span
                 className={`font-mono-tabular text-[11px] sm:text-xs font-bold shrink-0 ${livePaHrMetrics.statusColor}`}
                 title="Dryf Tętna (Aerobic Decoupling Pa:Hr %) porównujący I oraz II połowę jazdy"
               >
                 Pa:Hr {livePaHrMetrics.decouplingPct >= 0 ? `+${livePaHrMetrics.decouplingPct}` : livePaHrMetrics.decouplingPct}%
               </span>
-            )}
+            ) : telemetry.heartRateBpm === 0 ? (
+              <span className="text-[10px] font-bold text-sky-400 underline shrink-0">
+                Sniffer / +Pas
+              </span>
+            ) : null}
           </div>
 
           <div className="space-y-0.5 pt-1 border-t border-slate-800/80 min-w-0">
@@ -550,10 +605,15 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
               <div className="flex items-center gap-1.5 min-w-0">
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: currentHrZone.color }}
+                  style={{
+                    backgroundColor:
+                      telemetry.heartRateBpm > 0 ? currentHrZone.color : '#64748B',
+                  }}
                 />
                 <span className="font-bold text-white truncate min-w-0">
-                  {currentHrZone.name}
+                  {telemetry.heartRateBpm > 0
+                    ? currentHrZone.name
+                    : 'Brak odczytu HR'}
                 </span>
               </div>
               <span
@@ -851,6 +911,24 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* LIVE BLE PACKET SNIFFER & HR DECODER MODAL */}
+      <BlePacketSnifferModal
+        isOpen={isSnifferModalOpen}
+        onClose={() => setIsSnifferModalOpen(false)}
+        telemetry={telemetry}
+        onConnectExternalHrStrap={async () => {
+          if (onConnectExternalHrStrap) {
+            await onConnectExternalHrStrap();
+          }
+        }}
+        onDisconnectExternalHrStrap={() => {
+          if (onDisconnectExternalHrStrap) {
+            onDisconnectExternalHrStrap();
+          }
+        }}
+        onNotifyToast={onNotifyToast}
+      />
     </div>
   );
 };

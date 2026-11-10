@@ -540,8 +540,8 @@ export default function App() {
             targetPowerWatts: targetWatts,
             externalPowerWatts: bike.externalPowerWatts ?? undefined,
             powerMatchOffsetWatts: bike.powerMatchOffsetWatts,
-            heartRateBpm: bike.heartRateBpm || 125,
-            cadenceRpm: bike.cadenceRpm || 88,
+            heartRateBpm: bike.heartRateBpm || (bike.isSimulator ? 125 : 0),
+            cadenceRpm: bike.cadenceRpm || (bike.isSimulator ? 88 : 0),
             speedKmh:
               bike.speedKmh > 0
                 ? bike.speedKmh
@@ -649,7 +649,7 @@ export default function App() {
               powerWatts: telemetry.powerWatts || 150,
               targetPowerWatts: telemetry.targetPowerWatts || 150,
               powerMatchOffsetWatts: 0,
-              heartRateBpm: telemetry.heartRateBpm || 130,
+              heartRateBpm: telemetry.heartRateBpm || (telemetry.isSimulator ? 130 : 0),
               cadenceRpm: telemetry.cadenceRpm || 88,
               speedKmh: telemetry.speedKmh || 28.5,
               distanceMeters: Math.max(100, telemetry.distanceMeters),
@@ -1851,6 +1851,15 @@ export default function App() {
               const res = await ftmsController.connectExternalPowerMeter();
               showToast(res.message);
             }}
+            onConnectExternalHrStrap={async () => {
+              const res = await ftmsController.connectExternalHeartRateStrap();
+              showToast(res.message);
+            }}
+            onDisconnectExternalHrStrap={() => {
+              ftmsController.disconnectExternalHeartRateStrap();
+              showToast('Rozłączono zewnętrzny pas tętna BLE.');
+            }}
+            onNotifyToast={showToast}
             onBackToWorkouts={() => {
               setIsFocusHudMode(false);
               setActiveTab('workouts');

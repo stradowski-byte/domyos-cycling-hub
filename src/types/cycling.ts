@@ -177,6 +177,41 @@ export interface CompletedActivity {
 
 export type ControlMode = 'erg_watts' | 'resistance_level';
 
+export type HrSourceType =
+  | 'none'
+  | 'bike_ftms'
+  | 'bike_hr_service'
+  | 'external_strap'
+  | 'custom_byte_offset'
+  | 'simulator';
+
+export interface BleRawPacketSample {
+  id: string;
+  timestampIso: string;
+  characteristicUuid: string;
+  characteristicName: string;
+  byteLength: number;
+  flagsUint16: number | null;
+  flagsHex: string;
+  activeFlagNames: string[];
+  rawBytesHex: string;
+  uint8Values: number[];
+  int16LeValues: { offset: number; value: number }[];
+  parsedSummary: string;
+  detectedHrCandidates: { byteIndex: number; valueBpm: number; reason: string }[];
+}
+
+export interface DiscoveredBleServiceInfo {
+  serviceUuid: string;
+  serviceName: string;
+  characteristics: {
+    uuid: string;
+    name: string;
+    properties: string[];
+    subscribed: boolean;
+  }[];
+}
+
 export interface LiveBikeTelemetry {
   connected: boolean;
   reconnecting?: boolean;
@@ -185,6 +220,11 @@ export interface LiveBikeTelemetry {
   isSimulator: boolean;
   externalPowerConnected: boolean;
   externalPowerDeviceName: string;
+  externalHrConnected?: boolean;
+  externalHrDeviceName?: string;
+  hrSource?: HrSourceType;
+  customHrByteOffset?: number | null;
+  lastRawBikeHex?: string;
   powerWatts: number;
   power3sAvgWatts: number;
   externalPowerWatts: number | null;

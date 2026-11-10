@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan naprawy dwóch luk logicznych w regułach bezpieczeństwa firestore.rules (usunięcie warunku braku właściciela w isOwnerOrShared oraz dodanie weryfikacji właściciela przy odczycie allow read) wraz z dostosowaniem wszystkich zapytań getDocs i onSnapshot we frontendzie do używania filtrów .where('ownerUid', '==', currentUid) oraz .where('profileId', '==', 'shared').",
-  "updatedAt":  "2026-11-10T18:22:04.255948820Z",
+  "summary":  "Plan naprawy odczytu tętna (HR) z roweru Domyos po Bluetooth (zerowanie zamrożonego 120 BPM z symulatora, adaptacyjny dekoder ramki 0x2AD2, automatyczna subskrypcja usługi 0x180D na rowerze oraz bezpośrednie parowanie zewnętrznego pasa tętna BLE 0x180D z telefonem) wraz z wbudowanym w Kokpit Skanerem i Dekoderem Ramek BLE na Żywo (HEX Sniffer) zapisującym próbki do Firebase i schowka.",
+  "updatedAt":  "2026-11-10T18:56:20.401138123Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
