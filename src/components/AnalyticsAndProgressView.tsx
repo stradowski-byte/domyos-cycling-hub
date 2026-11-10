@@ -59,6 +59,11 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
     [activities, profile.id]
   );
 
+  // Sub-navigation tab in Analytics ('rides_fit' is default so completed .FIT rides are immediately on top on mobile)
+  const [activeSubTab, setActiveSubTab] = useState<
+    'rides_fit' | 'peak_power' | 'fitness_hr'
+  >('rides_fit');
+
   // Selected ride for "Ostatnia / Wybrana Jazda" Peak Power & HR Breakdown
   const [selectedRideId, setSelectedRideId] = useState<string>('');
   // Selected period for "Ostatnie 30 dni / Wybrany miesiąc" Best Stats & HR Breakdown
@@ -211,36 +216,348 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
       : `Miesiąc ${selectedPeriod}`;
 
   return (
-    <div className="space-y-5 pb-8 min-w-0 max-w-full overflow-x-hidden">
-      {/* Header Banner: Active Profile & Data Source */}
-      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 flex flex-wrap items-center justify-between gap-3.5 min-w-0 overflow-hidden">
-        <div className="min-w-0">
-          <h2 className="text-base sm:text-lg font-bold text-white break-words">
-            Statystyki, Krzywa Mocy i Tętno — {profile.name}
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-            {hasIntervalsConnected
-              ? 'Tryb Intervals.icu + Analityka Lokalna: wykres Fitness (CTL/ATL/TSB) z Intervals.icu oraz krzywa mocy (5s–20m) i analiza tętna z Twoich jazd.'
-              : 'Wbudowany moduł analityczny: krzywa mocy szczytowej (5s–20m), szczegółowy breakdown tętna (Z1–Z5, W/BPM) oraz postępy z ostatnich 30 dni.'}
-          </p>
+    <div className="space-y-4 pb-8 min-w-0 max-w-full overflow-x-hidden">
+      {/* Header Banner + 3-Segment Sub-Navigation Bar */}
+      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 space-y-3 min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 min-w-0">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-white break-words">
+              Postępy, Pliki .FIT i Analityka — {profile.name}
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+              Eksportuj binarne pliki <code className="font-mono-tabular">.FIT</code> na samej górze lub przełącz na krzywą mocy (5s–20m) oraz analizę formy i tętna.
+            </p>
+          </div>
+
+          {hasIntervalsConnected && (
+            <button
+              onClick={onRefreshIntervalsWellness}
+              disabled={isLoadingWellness}
+              className="w-full sm:w-auto min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            >
+              <RefreshCw
+                className={`w-4 h-4 shrink-0 ${
+                  isLoadingWellness ? 'animate-spin text-emerald-400' : ''
+                }`}
+              />
+              Odśwież z Intervals.icu
+            </button>
+          )}
         </div>
 
-        {hasIntervalsConnected && (
+        {/* 3-Segment Sub-View Switcher (Rides & .FIT first!) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1 bg-[#0B0F17] rounded-xl border border-slate-800">
           <button
-            onClick={onRefreshIntervalsWellness}
-            disabled={isLoadingWellness}
-            className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            type="button"
+            onClick={() => setActiveSubTab('rides_fit')}
+            className={`min-h-[42px] px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
+              activeSubTab === 'rides_fit'
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-300 hover:text-white'
+            }`}
           >
-            <RefreshCw className={`w-4 h-4 shrink-0 ${isLoadingWellness ? 'animate-spin text-emerald-400' : ''}`} />
-            Odśwież z Intervals.icu
+            <Download className="w-4 h-4 shrink-0" />
+            <span>1. Ostatnie Jazdy i Pliki .FIT ({profileActivities.length})</span>
           </button>
-        )}
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('peak_power')}
+            className={`min-h-[42px] px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
+              activeSubTab === 'peak_power'
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Zap className="w-4 h-4 shrink-0" />
+            <span>2. Krzywa Mocy i Rekordy (5s–20m)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('fitness_hr')}
+            className={`min-h-[42px] px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
+              activeSubTab === 'fitness_hr'
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Heart className="w-4 h-4 shrink-0" />
+            <span>3. Forma (CTL/ATL) i Strefy Tętna</span>
+          </button>
+        </div>
       </div>
 
       {/* =====================================================================
-          PEAK POWER CURVE (5s, 10s, 30s, 1m, 2m, 5m, 20m) + HR BREAKDOWN
+          SUB-TAB 1 (DEFAULT): OSTATNIE JAZDY, KPI 7/30 DNI I EKSPORT PLIKÓW .FIT
+         ===================================================================== */}
+      {activeSubTab === 'rides_fit' && (
+        <div className="space-y-4 min-w-0">
+          {/* Quick 4-Card KPI Strip */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs text-slate-400 truncate">
+                OSTATNIE 7 DNI
+              </div>
+              <div className="font-mono-tabular text-xl sm:text-2xl font-bold text-emerald-400 mt-1 truncate">
+                {formatDurationClock(duration7dSec)}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 truncate">
+                {ridesLast7d.length}{' '}
+                {ridesLast7d.length === 1 ? 'trening' : 'treningów'}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs text-slate-400 truncate">
+                OSTATNIE 30 DNI
+              </div>
+              <div className="font-mono-tabular text-xl sm:text-2xl font-bold text-sky-400 mt-1 truncate">
+                {formatDurationClock(duration30dSec)}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 truncate">
+                {ridesLast30d.length} jazd · {work30dKj} kJ
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs text-slate-400 truncate">
+                ŚREDNIA MOC / REKORD NP
+              </div>
+              <div className="font-mono-tabular text-lg sm:text-2xl font-bold text-white mt-1 truncate">
+                {avgPowerAllRides || '--'}W{' '}
+                <span className="text-xs sm:text-sm text-amber-400 font-semibold">
+                  / NP {bestNpWatts || '--'}W
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 truncate">
+                Aktualne FTP: {profile.ftpWatts} W
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-3.5 sm:p-4 min-w-0">
+              <div className="text-[11px] sm:text-xs text-slate-400 truncate">
+                ŚWIEŻOŚĆ (TSB) / ŁADUNEK
+              </div>
+              <div
+                className={`font-mono-tabular text-lg sm:text-2xl font-bold mt-1 truncate ${
+                  latestWellness.tsb >= -10
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }`}
+              >
+                TSB{' '}
+                {latestWellness.tsb > 0
+                  ? `+${latestWellness.tsb.toFixed(1)}`
+                  : latestWellness.tsb.toFixed(1)}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 truncate">
+                Łącznie {totalRides} jazd · {totalTss} TSS
+              </div>
+            </div>
+          </div>
+
+          {/* COMPLETED ACTIVITIES & GARMIN .FIT / FIREBASE / GOOGLE FIT / INTERVALS EXPORT */}
+          <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-bold text-white break-words">
+                  Zakończone Treningi i Eksport Plików (.FIT w /User_Data/{profile.id}/Workouts_FIT)
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                  Pobierz binarny plik <code className="font-mono-tabular">.FIT</code> do Garmin Connect / Stravy, wyślij do Google Fit / Firebase lub kliknij „Krzywa 5s–20m”, aby przeanalizować szczyty mocy.
+                </p>
+              </div>
+            </div>
+
+            {profileActivities.length === 0 ? (
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-5 text-center text-xs sm:text-sm text-slate-400 break-words">
+                Brak zapisanych sesji dla profilu{' '}
+                <strong className="text-white">{profile.name}</strong>. Po
+                zakończonej jeździe w zakładce Kokpit i kliknięciu „ZAKOŃCZ”
+                plik .FIT zapisze się automatycznie w{' '}
+                <code className="break-all">
+                  /User_Data/{profile.id}/Workouts_FIT
+                </code>{' '}
+                oraz pojawi się tutaj na samej górze.
+              </div>
+            ) : (
+              <div className="space-y-3 min-w-0">
+                {profileActivities.map((act) => {
+                  const isSelected = activeRide?.id === act.id;
+                  return (
+                    <div
+                      key={act.id}
+                      onClick={() => setSelectedRideId(act.id)}
+                      className={`cursor-pointer rounded-xl bg-[#0B0F17] border p-3.5 sm:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 transition-colors min-w-0 overflow-hidden ${
+                        isSelected
+                          ? 'border-emerald-500'
+                          : 'border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-slate-400 min-w-0">
+                          <span className="font-mono-tabular text-slate-300">
+                            {act.startedAtIso.slice(0, 16).replace('T', ' ')}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono-tabular">
+                            Czas: {formatDurationClock(act.durationSec)}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>
+                            Firebase:{' '}
+                            <strong
+                              className={
+                                act.syncedToFirebase || act.syncedToGoogleDrive
+                                  ? 'text-emerald-400'
+                                  : 'text-amber-400'
+                              }
+                            >
+                              {act.syncedToFirebase || act.syncedToGoogleDrive
+                                ? 'Zapisano (.FIT)'
+                                : 'Pending'}
+                            </strong>
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>
+                            Google Fit:{' '}
+                            <strong
+                              className={
+                                act.syncedToGoogleFit
+                                  ? 'text-rose-400'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {act.syncedToGoogleFit ? 'Wysłano' : 'Gotowy'}
+                            </strong>
+                          </span>
+                          {hasIntervalsConnected && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>
+                                ICU:{' '}
+                                <strong
+                                  className={
+                                    act.syncedToIntervals
+                                      ? 'text-sky-400'
+                                      : 'text-slate-400'
+                                  }
+                                >
+                                  {act.syncedToIntervals ? 'Wysłano' : 'Gotowy'}
+                                </strong>
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <h4 className="text-sm font-bold text-white flex flex-wrap items-center gap-2 break-words">
+                          <span>{act.workoutName}</span>
+                        </h4>
+
+                        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-slate-300 font-mono-tabular pt-0.5">
+                          <span>
+                            Śr. Moc:{' '}
+                            <strong className="text-emerald-400">
+                              {act.avgPowerWatts}W
+                            </strong>
+                          </span>
+                          <span>
+                            Max:{' '}
+                            <strong className="text-amber-400">
+                              {act.maxPowerWatts}W
+                            </strong>
+                          </span>
+                          <span>
+                            NP:{' '}
+                            <strong className="text-white">
+                              {act.normalizedPowerWatts}W
+                            </strong>
+                          </span>
+                          <span>
+                            TSS:{' '}
+                            <strong className="text-amber-400">{act.tss}</strong>{' '}
+                            (IF {act.intensityFactor})
+                          </span>
+                          <span>
+                            HR:{' '}
+                            <strong className="text-rose-400">
+                              {act.avgHrBpm}/{act.maxHrBpm} bpm
+                            </strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div
+                        className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0 w-full lg:w-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => onDownloadFit(act)}
+                          className="col-span-2 sm:col-span-1 min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                        >
+                          <Download className="w-4 h-4 shrink-0" />
+                          <span className="truncate">Pobierz .FIT</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedRideId(act.id);
+                            setActiveSubTab('peak_power');
+                          }}
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                        >
+                          <Zap className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Krzywa 5s–20m</span>
+                        </button>
+
+                        <button
+                          onClick={() => onDownloadTcx(act)}
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                        >
+                          <FileCode className="w-4 h-4 shrink-0" />
+                          <span>.TCX</span>
+                        </button>
+
+                        <button
+                          onClick={() => onUploadToFirebase(act)}
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                        >
+                          <CloudUpload className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="truncate">Firebase</span>
+                        </button>
+
+                        <button
+                          onClick={() => onUploadToGoogleFit(act)}
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                        >
+                          <Activity className="w-4 h-4 shrink-0" />
+                          <span className="truncate">Google Fit</span>
+                        </button>
+
+                        {hasIntervalsConnected && (
+                          <button
+                            onClick={() => onUploadToIntervals(act)}
+                            className="col-span-2 sm:col-span-1 min-h-[40px] px-3 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                          >
+                            <span className="truncate">Intervals.icu</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          SUB-TAB 2: PEAK POWER CURVE (5s, 10s, 30s, 1m, 2m, 5m, 20m)
           Comparison: Last/Selected Ride vs Best of Last 30 Days / Month
          ===================================================================== */}
+      {activeSubTab === 'peak_power' && (
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 border-b border-slate-800 pb-4 min-w-0">
           <div className="space-y-1 min-w-0">
@@ -397,10 +714,13 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
           })}
         </div>
       </div>
+      )}
 
       {/* =====================================================================
-          DETAILED HEART RATE BREAKDOWN (Z1-Z5, WATTS IN ZONE, W/BPM EFFICIENCY)
+          SUB-TAB 3: FORMA (CTL/ATL/TSB), STREFY MOCY I BREAKDOWN TĘTNA (W/BPM)
          ===================================================================== */}
+      {activeSubTab === 'fitness_hr' && (
+        <div className="space-y-4 min-w-0">
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5 min-w-0">
           <div className="space-y-0.5 min-w-0">
@@ -787,177 +1107,8 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
           })}
         </div>
       </div>
-
-      {/* COMPLETED ACTIVITIES & GARMIN .FIT / GOOGLE DRIVE / INTERVALS EXPORT */}
-      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
-        <div className="flex items-center justify-between min-w-0">
-          <div className="min-w-0">
-            <h3 className="text-sm sm:text-base font-bold text-white break-words">
-              Zakończone Treningi i Eksport Plików (.FIT w /User_Data/{profile.id}/Workouts_FIT)
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-              Kliknij wybraną jazdę, aby podejrzeć jej krzywą mocy szczytowej (5s–20m) powyżej, lub pobierz binarny plik .FIT do Garmin Connect.
-            </p>
-          </div>
         </div>
-
-        {profileActivities.length === 0 ? (
-          <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-5 text-center text-xs sm:text-sm text-slate-400 break-words">
-            Brak zapisanych sesji dla profilu <strong className="text-white">{profile.name}</strong>. Po zakończonej jeździe w zakładce Workout Mode i kliknięciu „ZAKOŃCZ” plik .FIT zapisze się automatycznie w <code className="break-all">/User_Data/{profile.id}/Workouts_FIT</code> oraz pojawi się tutaj.
-          </div>
-        ) : (
-          <div className="space-y-3 min-w-0">
-            {profileActivities.map((act) => {
-              const isSelected = activeRide?.id === act.id;
-              return (
-                <div
-                  key={act.id}
-                  onClick={() => setSelectedRideId(act.id)}
-                  className={`cursor-pointer rounded-xl bg-[#0B0F17] border p-3.5 sm:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 transition-colors min-w-0 overflow-hidden ${
-                    isSelected
-                      ? 'border-emerald-500'
-                      : 'border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="space-y-1.5 min-w-0">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-slate-400 min-w-0">
-                      <span className="font-mono-tabular text-slate-300">
-                        {act.startedAtIso.slice(0, 16).replace('T', ' ')}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-mono-tabular">
-                        Czas: {formatDurationClock(act.durationSec)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="truncate">
-                        OPFS:{' '}
-                        <strong className="text-emerald-400 font-mono-tabular">
-                          /{act.profileId}/Workouts_FIT
-                        </strong>
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        Firebase:{' '}
-                        <strong
-                          className={
-                            act.syncedToFirebase || act.syncedToGoogleDrive
-                              ? 'text-emerald-400'
-                              : 'text-amber-400'
-                          }
-                        >
-                          {act.syncedToFirebase || act.syncedToGoogleDrive
-                            ? 'Zapisano (.FIT)'
-                            : 'Pending'}
-                        </strong>
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        Google Fit:{' '}
-                        <strong
-                          className={
-                            act.syncedToGoogleFit
-                              ? 'text-rose-400'
-                              : 'text-slate-400'
-                          }
-                        >
-                          {act.syncedToGoogleFit ? 'Wysłano' : 'Gotowy'}
-                        </strong>
-                      </span>
-                      {hasIntervalsConnected && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span>
-                            ICU:{' '}
-                            <strong className={act.syncedToIntervals ? 'text-sky-400' : 'text-slate-400'}>
-                              {act.syncedToIntervals ? 'Wysłano' : 'Gotowy'}
-                            </strong>
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    <h4 className="text-sm font-bold text-white flex flex-wrap items-center gap-2 break-words">
-                      <span>{act.workoutName}</span>
-                      {isSelected && (
-                        <span className="text-[11px] font-semibold text-emerald-400">
-                          (Podgląd krzywej 5s–20m)
-                        </span>
-                      )}
-                    </h4>
-
-                    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-slate-300 font-mono-tabular pt-0.5">
-                      <span>
-                        Śr. Moc: <strong className="text-emerald-400">{act.avgPowerWatts}W</strong>
-                      </span>
-                      <span>
-                        Max: <strong className="text-amber-400">{act.maxPowerWatts}W</strong>
-                      </span>
-                      <span>
-                        NP: <strong className="text-white">{act.normalizedPowerWatts}W</strong>
-                      </span>
-                      <span>
-                        TSS: <strong className="text-amber-400">{act.tss}</strong> (IF {act.intensityFactor})
-                      </span>
-                      <span>
-                        HR: <strong className="text-rose-400">{act.avgHrBpm}/{act.maxHrBpm} bpm</strong>
-                      </span>
-                      <span>
-                        Kad.: <strong>{act.avgCadenceRpm} rpm</strong>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
-                    className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0 w-full lg:w-auto"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={() => onDownloadFit(act)}
-                      className="col-span-2 sm:col-span-1 min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                    >
-                      <Download className="w-4 h-4 shrink-0" />
-                      <span className="truncate">Pobierz .FIT (Garmin)</span>
-                    </button>
-
-                    <button
-                      onClick={() => onDownloadTcx(act)}
-                      className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                    >
-                      <FileCode className="w-4 h-4 shrink-0" />
-                      <span>.TCX</span>
-                    </button>
-
-                    <button
-                      onClick={() => onUploadToFirebase(act)}
-                      className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                    >
-                      <CloudUpload className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span className="truncate">Firebase Cloud</span>
-                    </button>
-
-                    <button
-                      onClick={() => onUploadToGoogleFit(act)}
-                      className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                    >
-                      <Activity className="w-4 h-4 shrink-0" />
-                      <span className="truncate">Google Fit</span>
-                    </button>
-
-                    {hasIntervalsConnected && (
-                      <button
-                        onClick={() => onUploadToIntervals(act)}
-                        className="col-span-2 sm:col-span-1 min-h-[40px] px-3 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                      >
-                        <span className="truncate">Wyślij do Intervals.icu</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

@@ -27,6 +27,10 @@ export function buildDefaultPowerZones(): PowerZone[] {
   ];
 }
 
+export function buildPowerZonesFromFtp(_ftpWatts?: number): PowerZone[] {
+  return buildDefaultPowerZones();
+}
+
 export function buildHrZonesFromMax(maxHr: number): HeartRateZone[] {
   return [
     { zone: 1, name: 'Z1 Regeneracja', minBpm: Math.round(maxHr * 0.5), maxBpm: Math.round(maxHr * 0.6), color: '#94A3B8' },
@@ -366,17 +370,74 @@ export function formatBlocksToIntervalsText(blocks: WorkoutBlock[]): string {
     .join('\n');
 }
 
+export const DEFAULT_WORKOUT_TAGS: string[] = [
+  'Z2',
+  'Endurance',
+  'Threshold / Sweet Spot',
+  'VO2max',
+  'Testy (FTP 20m / Ramp)',
+  'Recovery',
+];
+
+/**
+ * Infers one or more category tags for a workout if `workout.tags` is missing or empty.
+ */
+export function inferWorkoutTags(
+  workout: Pick<StructuredWorkout, 'name' | 'category' | 'tags' | 'description'>
+): string[] {
+  if (Array.isArray(workout.tags) && workout.tags.length > 0) {
+    return Array.from(new Set(workout.tags.map((t) => t.trim()).filter(Boolean)));
+  }
+
+  const inferred = new Set<string>();
+  const text = `${workout.name} ${workout.description || ''}`.toLowerCase();
+
+  if (
+    workout.category === 'RampTest' ||
+    /ramp\s*test|test\s*ftp|20\s*min.*ftp|test\s*wydolno/i.test(text)
+  ) {
+    inferred.add('Testy (FTP 20m / Ramp)');
+  }
+  if (/z2|fatmax|tlenow|spalanie/i.test(text)) {
+    inferred.add('Z2');
+  }
+  if (workout.category === 'Endurance' || /endurance|wytrzyma|tempo/i.test(text)) {
+    inferred.add('Endurance');
+  }
+  if (
+    workout.category === 'Threshold' ||
+    /sweet\s*spot|threshold|próg|prog|over-under|cruise/i.test(text)
+  ) {
+    inferred.add('Threshold / Sweet Spot');
+  }
+  if (
+    workout.category === 'VO2Max' ||
+    /vo2|interwa|30\/15|4x4|billat|rønnestad|ronnestad/i.test(text)
+  ) {
+    inferred.add('VO2max');
+  }
+  if (workout.category === 'Recovery' || /recovery|regenerac|rozjazd|openers/i.test(text)) {
+    inferred.add('Recovery');
+  }
+
+  if (inferred.size === 0) {
+    inferred.add('Endurance');
+  }
+
+  return Array.from(inferred);
+}
+
 /**
  * Serializes a StructuredWorkout into a standalone, human-readable Intervals.icu .txt file
  * that lives in /DomyosCyclingHub/Workouts_Library/<profileId>/ (or locally on disk).
- * User ownership is determined by the folder path (/<profileId> or /shared), so no user prefix
- * or profile metadata is required inside the file.
  */
 export function serializeWorkoutToIcuTextFile(workout: StructuredWorkout): string {
+  const tags = inferWorkoutTags(workout);
   const headerLines = [
     `# ID: ${workout.id}`,
     `# Name: ${workout.name}`,
     `# Category: ${workout.category}`,
+    `# Tags: ${tags.join(', ')}`,
     workout.scheduledDate ? `# Date: ${workout.scheduledDate}` : null,
     workout.description ? `# Description: ${workout.description.replace(/\r?\n/g, ' ')}` : null,
     '',
@@ -398,8 +459,6 @@ export function getCleanWorkoutTxtFileName(workout: StructuredWorkout): string {
 
 /**
  * Parses an Intervals.icu .txt workout file into an executable StructuredWorkout object.
- * When `folderProfileId` is provided (from /Workouts_Library/<profileId> or /shared),
- * ownership is assigned directly from the parent folder without needing metadata in the file.
  */
 export function parseIcuTextFileToWorkout(
   textContent: string,
@@ -429,19 +488,43 @@ export function parseIcuTextFileToWorkout(
     extractMeta('Description') ||
     `Plik tekstowy .txt z katalogu /Workouts_Library/${profileId}`;
 
+  const rawCategory = extractMeta('Category') as StructuredWorkout['category'] | undefined;
+  const validCategories: StructuredWorkout['category'][] = [
+    'Endurance',
+    'Threshold',
+    'VO2Max',
+    'RampTest',
+    'Recovery',
+    'Custom',
+  ];
+  const category: StructuredWorkout['category'] =
+    rawCategory && validCategories.includes(rawCategory) ? rawCategory : 'Custom';
+
+  const rawTagsHeader = extractMeta('Tags');
+  const parsedHeaderTags = rawTagsHeader
+    ? rawTagsHeader
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : [];
+
   const blocks = parseIntervalsWorkoutText(textContent, 200);
 
-  return {
+  const baseWorkout: StructuredWorkout = {
     id,
     profileId,
     name,
     description,
-    category: 'Custom',
+    category,
+    tags: parsedHeaderTags,
     scheduledDate,
     source: 'local',
     blocks,
     createdAtIso: new Date().toISOString(),
   };
+
+  baseWorkout.tags = inferWorkoutTags(baseWorkout);
+  return baseWorkout;
 }
 
 export function downloadWorkoutAsTextFile(workout: StructuredWorkout): void {
@@ -459,15 +542,182 @@ export function downloadWorkoutAsTextFile(workout: StructuredWorkout): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Returns the comprehensive 18-workout scientific library with 3–4 workouts per category
+ * (Z2, Endurance, Threshold / Sweet Spot, VO2max, Testy (FTP 20m / Ramp), Recovery).
+ */
 export function getInitialWorkouts(): StructuredWorkout[] {
   const today = new Date().toISOString().slice(0, 10);
   return [
+    // =========================================================================
+    // KATEGORIA 1: Z2 (BAZA TLENOWA & FATMAX) — 4 treningi
+    // =========================================================================
+    {
+      id: 'w_z2_steady_45',
+      profileId: 'shared',
+      name: 'Klasyczna Baza Tlenowa Z2 Steady (45 min)',
+      description:
+        'Równa jazda w środku 2. strefy mocy (65% FTP) stymulująca biogenezę mitochondriów, kapilaryzację mięśni i maksymalne utlenianie tłuszczów (FatMax).',
+      category: 'Endurance',
+      tags: ['Z2', 'Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 6m ramp 45-65% 88rpm\n- 34m 65% 90rpm\n- 5m ramp 62-42% 82rpm`
+      ),
+    },
+    {
+      id: 'w_cardio_fatburn_z2',
+      profileId: 'shared',
+      name: 'Piramida Tlenowa Z2 FatMax (40 min)',
+      description:
+        'Progresywna piramida w strefie tlenowej Z2 (58% -> 65% -> 72% -> 62% FTP) utrzymująca wysokie zaangażowanie włókien wolnokurczliwych Typu I.',
+      category: 'Endurance',
+      tags: ['Z2'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 5m ramp 45-58% 85rpm\n- 8m 58% 88rpm\n- 10m 65% 90rpm\n- 7m 72% 92rpm\n- 5m 62% 88rpm\n- 5m ramp 58-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_z2_cadence_bursts_50',
+      profileId: 'shared',
+      name: 'Baza Z2 z Pobudzeniami Kadencyjnymi (50 min)',
+      description:
+        'Trening tlenowy 65% FTP przeplatany 4 krótkimi pobudzeniami nerwowo-mięśniowymi (30s @ 105 rpm) bez przekraczania progu mleczanowego.',
+      category: 'Endurance',
+      tags: ['Z2', 'Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 6m ramp 45-65% 88rpm\n4x\n- 9m 65% 90rpm\n- 30s 78% 105rpm\n- 6m 64% 88rpm\n- 2m ramp 60-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_z2_wave_endurance_60',
+      profileId: 'shared',
+      name: 'Falowa Wytrzymałość Tlenowa Z2 (60 min)',
+      description:
+        'Godzinna sesja wytrzymałościowa z łagodnymi falami mocy między 60% a 73% FTP eliminującymi monotonię jazdy na trenażerze.',
+      category: 'Endurance',
+      tags: ['Z2', 'Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 6m ramp 45-62% 88rpm\n3x\n- 8m ramp 60-73% 90rpm\n- 8m ramp 73-60% 88rpm\n- 6m ramp 60-42% 82rpm`
+      ),
+    },
+
+    // =========================================================================
+    // KATEGORIA 2: ENDURANCE (WYTRZYMAŁOŚĆ & TEMPO AEROBOWE) — 3 dodatkowe (+3 wspólne z Z2)
+    // =========================================================================
+    {
+      id: 'w_endurance_ramps',
+      profileId: 'shared',
+      name: 'Wytrzymałość Zmienna Z2/Z3 Tempo (45 min)',
+      description:
+        'Trening wytrzymałościowy z płynnymi przejściami ze strefy Z2 (68% FTP) do dolnego Tempo Z3 (84% FTP) budujący odporność mięśniową (durability).',
+      category: 'Endurance',
+      tags: ['Endurance', 'Z2'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 6m ramp 45-68% 86rpm\n- 10m ramp 68-82% 90rpm\n- 5m 65% 88rpm\n- 10m ramp 70-84% 92rpm\n- 9m 68% 90rpm\n- 5m ramp 62-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_endurance_progressive_tempo_50',
+      profileId: 'shared',
+      name: 'Progresywne Tempo Aerobowe 3x 10 min (50 min)',
+      description:
+        'Trzy 10-minutowe rampy w strefie Z2/Z3 (72% -> 85% FTP) podnoszące ekonomię pedałowania i próg tlenowy LT1.',
+      category: 'Endurance',
+      tags: ['Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 48-70% 88rpm\n3x\n- 10m ramp 72-85% 92rpm\n- 3m 60% 85rpm\n- 3m ramp 60-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_endurance_torque_low_cadence_45',
+      profileId: 'shared',
+      name: 'Wytrzymałość Siłowa Niska Kadencja 4x 5 min (45 min)',
+      description:
+        'Cztery 5-minutowe odcinki w górnym Z2 / dolnym Z3 (80% FTP) przy kadencji 68 RPM rozwijające moment obrotowy i siłę specyficzną na podjazdach.',
+      category: 'Endurance',
+      tags: ['Endurance'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 45-70% 88rpm\n4x\n- 5m 80% 68rpm\n- 3m 60% 90rpm\n- 5m ramp 62-42% 82rpm`
+      ),
+    },
+
+    // =========================================================================
+    // KATEGORIA 3: THRESHOLD / SWEET SPOT (PRÓG FTP) — 4 treningi
+    // =========================================================================
+    {
+      id: 'w_sweetspot_3x10',
+      profileId: 'shared',
+      name: 'Klasyczny Sweet Spot 3x 10 min (50 min)',
+      description:
+        'Złoty standard budowania bazy pod próg FTP: 3x 10 minut na 90% FTP z 4-minutowym odpoczynkiem. Wysoki bodziec adaptacyjny przy umiarkowanym koszcie zmęczenia.',
+      category: 'Threshold',
+      tags: ['Threshold / Sweet Spot'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 48-78% 90rpm\n3x\n- 10m 90% 92rpm\n- 4m 55% 85rpm\n- 4m ramp 60-42% 80rpm`
+      ),
+    },
+    {
+      id: 'w_threshold_over_unders_50',
+      profileId: 'shared',
+      name: 'Over-Unders (Wypłukiwanie Mleczanu) 3x 9 min (50 min)',
+      description:
+        'Naprzemienna praca 2 min pod progiem (92% FTP) i 1 min nad progiem (105% FTP) trenująca transportery MCT1/MCT4 do utylizacji mleczanu jako paliwa.',
+      category: 'Threshold',
+      tags: ['Threshold / Sweet Spot'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n3x\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 2m 92% 92rpm\n- 1m 105% 96rpm\n- 4m 55% 85rpm\n- 3m ramp 58-40% 80rpm`
+      ),
+    },
+    {
+      id: 'w_threshold_cruise_4x8',
+      profileId: 'shared',
+      name: 'Próg Mleczanowy Cruise Intervals 4x 8 min (55 min)',
+      description:
+        'Cztery 8-minutowe odcinki dokładnie na progu FTP (99% FTP) zwiększające czas utrzymania mocy krytycznej (TTE) oraz równowagę MLSS.',
+      category: 'Threshold',
+      tags: ['Threshold / Sweet Spot'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 45-80% 90rpm\n4x\n- 8m 99% 94rpm\n- 3m 55% 85rpm\n- 3m ramp 60-40% 80rpm`
+      ),
+    },
     {
       id: 'w_ramp_sweetspot',
       profileId: 'shared',
-      name: 'Sweet Spot & Tempo (45 min)',
-      description: 'Rozgrzewka progresywna, 3 odcinki w strefie Sweet Spot/FTP oraz spokojne schłodzenie.',
+      name: 'Progresywny Sweet Spot & Finisz FTP (45 min)',
+      description:
+        'Rozgrzewka progresywna, 3 odcinki narastające od strefy Sweet Spot (80% FTP) do ponad progu (106% FTP) oraz spokojne schłodzenie.',
       category: 'Threshold',
+      tags: ['Threshold / Sweet Spot'],
       scheduledDate: today,
       source: 'local',
       createdAtIso: new Date().toISOString(),
@@ -551,118 +801,82 @@ export function getInitialWorkouts(): StructuredWorkout[] {
         },
       ],
     },
+
+    // =========================================================================
+    // KATEGORIA 4: VO2MAX (PUŁAP TLENOWY) — 4 treningi
+    // =========================================================================
     {
-      id: 'w_endurance_ramps',
+      id: 'w_vo2_ronnestad_30_15',
       profileId: 'shared',
-      name: 'Wytrzymałość Tlenowa & Cardio Z2/Z3 (30 min)',
-      description: 'Trening wytrzymałościowy i cardio z płynnymi zmianami tempa i kadencji w strefach Z2/Z3.',
-      category: 'Endurance',
-      scheduledDate: today,
-      source: 'local',
-      createdAtIso: new Date().toISOString(),
-      blocks: [
-        {
-          id: 'jb1',
-          label: 'Rozgrzewka',
-          type: 'ramp',
-          durationSec: 360,
-          unit: 'pct_ftp',
-          startValue: 45,
-          endValue: 68,
-          rampCurve: 'linear',
-          targetCadenceRpm: 85,
-        },
-        {
-          id: 'jb2',
-          label: 'Wejście w Z2/Z3',
-          type: 'ramp',
-          durationSec: 300,
-          unit: 'pct_ftp',
-          startValue: 68,
-          endValue: 85,
-          rampCurve: 'linear',
-          targetCadenceRpm: 90,
-        },
-        {
-          id: 'jb3',
-          label: 'Utrzymanie Tempo Z3',
-          type: 'steady',
-          durationSec: 180,
-          unit: 'pct_ftp',
-          startValue: 85,
-          endValue: 85,
-          rampCurve: 'linear',
-          targetCadenceRpm: 92,
-        },
-        {
-          id: 'jb4',
-          label: 'Powrót do Z2',
-          type: 'ramp',
-          durationSec: 240,
-          unit: 'pct_ftp',
-          startValue: 85,
-          endValue: 60,
-          rampCurve: 'linear',
-          targetCadenceRpm: 85,
-        },
-        {
-          id: 'jb5',
-          label: 'Druga Fala Tempo',
-          type: 'ramp',
-          durationSec: 300,
-          unit: 'pct_ftp',
-          startValue: 65,
-          endValue: 88,
-          rampCurve: 'progressive',
-          targetCadenceRpm: 90,
-          startResistanceLevel: 8,
-          endResistanceLevel: 16,
-        },
-        {
-          id: 'jb6',
-          label: 'Wyciszenie',
-          type: 'ramp',
-          durationSec: 300,
-          unit: 'pct_ftp',
-          startValue: 60,
-          endValue: 40,
-          rampCurve: 'linear',
-          targetCadenceRpm: 80,
-        },
-      ],
-    },
-    {
-      id: 'w_cardio_fatburn_z2',
-      profileId: 'shared',
-      name: 'Cardio & Spalanie Tlenowe Z2 (35 min)',
-      description: 'Komfortowa sesja w strefie tlenowej Z2 skupiona na redukcji tkanki tłuszczowej i kondycji sercowo-naczyniowej.',
-      category: 'Recovery',
+      name: 'Mikrointerwały Rønnestad 2x (10x 30s/15s) (42 min)',
+      description:
+        'Słynny protokół prof. Benta Rønnestada: 30s @ 120% FTP przeplatane 15s @ 50% FTP. Utrzymuje wysokie zużycie tlenu przy niższym zakwaszeniu niż długie bloki.',
+      category: 'VO2Max',
+      tags: ['VO2max'],
       scheduledDate: today,
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 5m ramp 45-62% 85rpm\n- 10m 65% 88rpm\n- 8m ramp 65-73% 90rpm\n- 7m 64% 88rpm\n- 5m ramp 60-42% 80rpm`
+        `- 8m ramp 48-78% 90rpm\n- 2m 55% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n- 5m 52% 85rpm\n10x\n- 30s 120% 98rpm\n- 15s 50% 85rpm\n- 5m ramp 60-40% 80rpm`
+      ),
+    },
+    {
+      id: 'w_vo2_seiler_4x4',
+      profileId: 'shared',
+      name: 'Protokół Seilera 4x 4 min VO2max (45 min)',
+      description:
+        'Klasyczny norweski interwał tlenowy dr. Stephena Seilera: 4x 4 minuty @ 112% FTP z 3-minutowym aktywnym wypoczynkiem maksymalizujący objętość wyrzutową serca.',
+      category: 'VO2Max',
+      tags: ['VO2max'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 48-80% 90rpm\n- 2m 55% 85rpm\n4x\n- 4m 112% 96rpm\n- 3m 52% 85rpm\n- 5m ramp 60-40% 80rpm`
       ),
     },
     {
       id: 'w_vo2_30_30',
       profileId: 'shared',
-      name: 'Interwały VO2Max 6x 1 min',
-      description: 'Klasyczny bodziec tlenowy: rozgrzewka i seria 6 dynamicznych odcinków 118% FTP.',
+      name: 'Interwały VO2max Billat 6x 2 min (42 min)',
+      description:
+        'Sześć dynamicznych 2-minutowych powtórzeń na 116% FTP według koncepcji Véronique Billat (czas na vVO2max) z pełnym 2-minutowym odpoczynkiem.',
       category: 'VO2Max',
+      tags: ['VO2max'],
       scheduledDate: today,
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: parseIntervalsWorkoutText(
-        `- 8m ramp 50-80% 90rpm\n- 2m 55% 85rpm\n6x\n- 1m 118% 98rpm\n- 1m 55% 85rpm\n- 5m ramp 65-42% 80rpm`
+        `- 8m ramp 50-80% 90rpm\n- 2m 55% 85rpm\n6x\n- 2m 116% 96rpm\n- 2m 52% 85rpm\n- 5m ramp 62-40% 80rpm`
       ),
     },
     {
+      id: 'w_vo2_pyramid_40',
+      profileId: 'shared',
+      name: 'Schodkowa Piramida VO2max 3m-2m-1m (40 min)',
+      description:
+        'Dwie serie schodkowe o malejącym czasie i rosnącej mocy (3m @ 110% -> 2m @ 118% -> 1m @ 126% FTP) angażujące pułap tlenowy i pojemność beztlenową.',
+      category: 'VO2Max',
+      tags: ['VO2max'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 7m ramp 48-78% 90rpm\n2x\n- 3m 110% 95rpm\n- 2m 52% 85rpm\n- 2m 118% 98rpm\n- 2m 52% 85rpm\n- 1m 126% 100rpm\n- 3m 50% 85rpm\n- 5m ramp 60-40% 80rpm`
+      ),
+    },
+
+    // =========================================================================
+    // KATEGORIA 5: TESTY (FTP 20M / RAMP) — 3 treningi
+    // =========================================================================
+    {
       id: 'w_step_ramp_test',
       profileId: 'shared',
-      name: 'Test Wydolnościowy FTP (Ramp Test)',
-      description: 'Sprawdzenie aktualnego progu FTP dla wybranego profilu z płynnie rosnącym obciążeniem.',
+      name: 'Test Wydolnościowy FTP — Ramp Test Standard (25 min)',
+      description:
+        'Progresywny test rampowy do odmowy (55% -> 145% FTP). Po zakończeniu system wylicza Twoje nowe eFTP jako 75% z najlepszej 1-minutowej mocy (MAP).',
       category: 'RampTest',
+      tags: ['Testy (FTP 20m / Ramp)'],
       source: 'local',
       createdAtIso: new Date().toISOString(),
       blocks: [
@@ -701,7 +915,151 @@ export function getInitialWorkouts(): StructuredWorkout[] {
         },
       ],
     },
+    {
+      id: 'w_test_ftp_20min_coggan',
+      profileId: 'shared',
+      name: 'Klasyczny Test FTP 20 Minut (Protokół Coggana / Allena) (45 min)',
+      description:
+        'Pełny protokół Huntera Allena i dr. Andrew Coggana: rozgrzewka, 3 pobudzenia, 5 min przepalenia (110% FTP) redukującego udział beztlenowy W\' oraz 20 min próby czasowej (FTP = 95% średniej z 20 min).',
+      category: 'RampTest',
+      tags: ['Testy (FTP 20m / Ramp)', 'Threshold / Sweet Spot'],
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 45-70% 90rpm\n3x\n- 1m 95% 100rpm\n- 1m 55% 85rpm\n- 3m 55% 85rpm\n- 5m 110% 95rpm\n- 5m 50% 85rpm\n- 20m ramp 98-105% 94rpm\n- 5m ramp 55-40% 80rpm`
+      ),
+    },
+    {
+      id: 'w_test_ramp_light',
+      profileId: 'shared',
+      name: 'Ramp Test Light / Łagodna Progresja (30 min)',
+      description:
+        'Łagodniejsza wersja testu rampowego (45% -> 130% FTP w 20 minut) polecana dla kolarzy o profilu wytrzymałościowym lub niższej masie ciała.',
+      category: 'RampTest',
+      tags: ['Testy (FTP 20m / Ramp)'],
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: [
+        {
+          id: 'rtl1',
+          label: 'Rozgrzewka Tlenowa',
+          type: 'ramp',
+          durationSec: 300,
+          unit: 'pct_ftp',
+          startValue: 40,
+          endValue: 50,
+          rampCurve: 'linear',
+          targetCadenceRpm: 88,
+        },
+        {
+          id: 'rtl2',
+          label: 'Łagodna Rampa Testowa (20 min)',
+          type: 'ramp',
+          durationSec: 1200,
+          unit: 'pct_ftp',
+          startValue: 50,
+          endValue: 130,
+          rampCurve: 'linear',
+          targetCadenceRpm: 92,
+        },
+        {
+          id: 'rtl3',
+          label: 'Schłodzenie Z1',
+          type: 'ramp',
+          durationSec: 300,
+          unit: 'pct_ftp',
+          startValue: 50,
+          endValue: 35,
+          rampCurve: 'linear',
+          targetCadenceRpm: 80,
+        },
+      ],
+    },
+
+    // =========================================================================
+    // KATEGORIA 6: RECOVERY (AKTYWNA REGENERACJA) — 3 treningi
+    // =========================================================================
+    {
+      id: 'w_recovery_active_spin_30',
+      profileId: 'shared',
+      name: 'Aktywna Regeneracja & Rozjazd Z1 (30 min)',
+      description:
+        'Bardzo lekka jazda w 1. strefie mocy (45-52% FTP) pobudzająca krążenie kapilarne i usuwanie metabolitów bez obciążania układu nerwowego.',
+      category: 'Recovery',
+      tags: ['Recovery'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 5m ramp 40-50% 85rpm\n- 20m 50% 88rpm\n- 5m ramp 50-38% 82rpm`
+      ),
+    },
+    {
+      id: 'w_recovery_flush_25',
+      profileId: 'shared',
+      name: 'Po-startowy Flush Mleczanowy Z1 (25 min)',
+      description:
+        'Krótka sesja regeneracyjna (25 minut) po ciężkim dniu interwałowym lub wyścigu rozluźniająca napięcie mięśniowe przy kadencji 90 RPM.',
+      category: 'Recovery',
+      tags: ['Recovery'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 5m ramp 38-52% 88rpm\n- 15m 52% 90rpm\n- 5m ramp 52-38% 82rpm`
+      ),
+    },
+    {
+      id: 'w_recovery_openers_30',
+      profileId: 'shared',
+      name: 'Przebudzenie Nerwowo-Mięśniowe (Openers 30 min)',
+      description:
+        'Trening aktywacyjny w dzień poprzedzający test FTP lub mocną sesję: lekki obrót Z1/Z2 z trzema 30-sekundowymi pobudzeniami na 105% FTP.',
+      category: 'Recovery',
+      tags: ['Recovery', 'Z2'],
+      scheduledDate: today,
+      source: 'local',
+      createdAtIso: new Date().toISOString(),
+      blocks: parseIntervalsWorkoutText(
+        `- 8m ramp 45-62% 88rpm\n3x\n- 30s 105% 100rpm\n- 3m30s 52% 85rpm\n- 10m ramp 55-40% 82rpm`
+      ),
+    },
   ];
+}
+
+/**
+ * Merges any missing initial scientific workouts into an existing workout list and ensures
+ * every workout has normalized `tags: string[]` without ever deleting or overwriting user workouts.
+ */
+export function mergeAndNormalizeWorkoutsLibrary(
+  existingWorkouts: StructuredWorkout[]
+): StructuredWorkout[] {
+  const initial = getInitialWorkouts();
+  const initialMap = new Map<string, StructuredWorkout>(
+    initial.map((w) => [w.id, w])
+  );
+  const resultMap = new Map<string, StructuredWorkout>();
+
+  for (const w of existingWorkouts || []) {
+    if (!w || !w.id || !Array.isArray(w.blocks)) continue;
+    const defaultMatch = initialMap.get(w.id);
+    const normalizedTags =
+      Array.isArray(w.tags) && w.tags.length > 0
+        ? w.tags
+        : defaultMatch?.tags || inferWorkoutTags(w);
+    resultMap.set(w.id, {
+      ...w,
+      tags: normalizedTags,
+    });
+  }
+
+  for (const defW of initial) {
+    if (!resultMap.has(defW.id)) {
+      resultMap.set(defW.id, defW);
+    }
+  }
+
+  return Array.from(resultMap.values());
 }
 
 export function calculateActivitySummary(
@@ -1193,4 +1551,164 @@ export function computeDetailedHrBreakdown(
     zones,
   };
 }
+
+export interface DetectedFtpEstimate {
+  estimatedFtpWatts: number;
+  previousFtpWatts: number;
+  deltaWatts: number;
+  protocolName: string;
+  sourceDetail: string;
+  isDedicatedTestWorkout: boolean;
+}
+
+/**
+ * Automatically detects estimated FTP after completing a workout (especially Ramp Test
+ * or Coggan 20m FTP Test, or any ride where 20m * 0.95 exceeds current FTP).
+ */
+export function detectEstimatedFtpFromCompletedActivity(
+  activity: CompletedActivity | null | undefined,
+  profile: AthleteProfile,
+  workout?: StructuredWorkout | null
+): DetectedFtpEstimate | null {
+  if (!activity) return null;
+
+  const nameLower = `${activity.workoutName || ''} ${workout?.name || ''}`.toLowerCase();
+  const workoutIdStr = (activity.workoutId || '').toLowerCase();
+  const tags = workout?.tags || [];
+  const isTestTagged = tags.some((t) => t.toLowerCase().includes('test'));
+  const isRampProtocol =
+    workoutIdStr.includes('ramp') ||
+    nameLower.includes('ramp test') ||
+    nameLower.includes('map ramp');
+  const is20mProtocol =
+    workoutIdStr.includes('ftp_20m') ||
+    nameLower.includes('20m ftp') ||
+    nameLower.includes('coggan');
+
+  const peaks =
+    activity.peakPowerWindows && activity.peakPowerWindows.length > 0
+      ? activity.peakPowerWindows
+      : computeRidePeakPowerAndHr(activity, profile);
+
+  const best1m = peaks.find((p) => p.durationSec === 60)?.maxMeanWatts ?? null;
+  const best5m = peaks.find((p) => p.durationSec === 300)?.maxMeanWatts ?? null;
+  const best20m = peaks.find((p) => p.durationSec === 1200)?.maxMeanWatts ?? null;
+
+  // 1. Ramp Test Protocol: 75% of Best 1-Minute Power (MAP)
+  if (isRampProtocol) {
+    const mapWatts = best1m || Math.max(activity.maxPowerWatts, activity.avgPowerWatts);
+    const estimated = Math.max(60, Math.round(mapWatts * 0.75));
+    return {
+      estimatedFtpWatts: estimated,
+      previousFtpWatts: profile.ftpWatts,
+      deltaWatts: estimated - profile.ftpWatts,
+      protocolName: 'Protokół Ramp Test (75% × 1 min MAP)',
+      sourceDetail: `Najlepsza 1 min (MAP): ${mapWatts} W × 0.75 = ${estimated} W`,
+      isDedicatedTestWorkout: true,
+    };
+  }
+
+  // 2. Classic 20-Minute FTP Test Protocol: 95% of Best 20-Minute Power
+  if (is20mProtocol || isTestTagged) {
+    const base20mWatts =
+      best20m || best5m || activity.normalizedPowerWatts || activity.avgPowerWatts;
+    const estimated = Math.max(60, Math.round(base20mWatts * 0.95));
+    return {
+      estimatedFtpWatts: estimated,
+      previousFtpWatts: profile.ftpWatts,
+      deltaWatts: estimated - profile.ftpWatts,
+      protocolName: 'Protokół Coggan 20m (95% × 20 min)',
+      sourceDetail: `Średnia z odcinka testowego: ${base20mWatts} W × 0.95 = ${estimated} W`,
+      isDedicatedTestWorkout: true,
+    };
+  }
+
+  // 3. Spontaneous FTP Breakthrough on regular workouts (if 95% of 20m power > current FTP)
+  if (best20m && Math.round(best20m * 0.95) > profile.ftpWatts) {
+    const estimated = Math.round(best20m * 0.95);
+    return {
+      estimatedFtpWatts: estimated,
+      previousFtpWatts: profile.ftpWatts,
+      deltaWatts: estimated - profile.ftpWatts,
+      protocolName: 'Rekord 20 min z jazdy (95% × 20 min)',
+      sourceDetail: `Najlepsze 20 min: ${best20m} W × 0.95 = ${estimated} W`,
+      isDedicatedTestWorkout: false,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Estimates suggested FTP from the rider's completed activities history (last 30 days or all rides).
+ */
+export function estimateSuggestedFtpFromHistory(
+  activities: CompletedActivity[],
+  profile: AthleteProfile
+): {
+  suggestedFtpWatts: number;
+  protocolLabel: string;
+  workoutName: string;
+  dateIso: string;
+} | null {
+  const profileActs = activities.filter((a) => a.profileId === profile.id);
+  if (profileActs.length === 0) return null;
+
+  let bestCandidate: {
+    suggestedFtpWatts: number;
+    protocolLabel: string;
+    workoutName: string;
+    dateIso: string;
+    priority: number;
+  } | null = null;
+
+  for (const act of profileActs.slice(0, 30)) {
+    const detected = detectEstimatedFtpFromCompletedActivity(act, profile);
+    if (detected) {
+      const priority = detected.isDedicatedTestWorkout ? 2 : 1;
+      if (
+        !bestCandidate ||
+        priority > bestCandidate.priority ||
+        (priority === bestCandidate.priority &&
+          detected.estimatedFtpWatts > bestCandidate.suggestedFtpWatts)
+      ) {
+        bestCandidate = {
+          suggestedFtpWatts: detected.estimatedFtpWatts,
+          protocolLabel: detected.protocolName,
+          workoutName: act.workoutName,
+          dateIso: act.startedAtIso,
+          priority,
+        };
+      }
+    } else {
+      const peaks =
+        act.peakPowerWindows && act.peakPowerWindows.length > 0
+          ? act.peakPowerWindows
+          : computeRidePeakPowerAndHr(act, profile);
+      const p20 = peaks.find((p) => p.durationSec === 1200)?.maxMeanWatts;
+      const p5 = peaks.find((p) => p.durationSec === 300)?.maxMeanWatts;
+      const est = p20
+        ? Math.round(p20 * 0.95)
+        : p5
+        ? Math.round(p5 * 0.85)
+        : Math.round(act.normalizedPowerWatts * 0.92);
+      if (est >= 60 && (!bestCandidate || (bestCandidate.priority === 0 && est > bestCandidate.suggestedFtpWatts))) {
+        bestCandidate = {
+          suggestedFtpWatts: est,
+          protocolLabel: p20
+            ? '95% z najlepszych 20 min'
+            : p5
+            ? '85% z najlepszych 5 min'
+            : 'Estymacja z Normalized Power (NP)',
+          workoutName: act.workoutName,
+          dateIso: act.startedAtIso,
+          priority: 0,
+        };
+      }
+    }
+  }
+
+  return bestCandidate;
+}
+
 

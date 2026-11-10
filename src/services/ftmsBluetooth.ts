@@ -112,9 +112,13 @@ export class FtmsBikeController {
   private lastSentWatts: number = -1;
   private lastSentRes: number = -1;
   private lastCommandTimeMs: number = 0;
+  private manualDisconnect: boolean = false;
+  private reconnectTimer: number | null = null;
 
   private state: LiveBikeTelemetry = {
     connected: false,
+    reconnecting: false,
+    reconnectAttempt: 0,
     deviceName: 'Brak połączenia',
     isSimulator: false,
     externalPowerConnected: false,
@@ -151,6 +155,89 @@ export class FtmsBikeController {
     return { ...this.state };
   }
 
+  private clearReconnectTimer() {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private async setupFtmsGattServices(device: any): Promise<void> {
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(FTMS_SERVICE_UUID);
+
+    // Subscribe to Indoor Bike Data (0x2AD2)
+    const bikeDataChar = await service.getCharacteristic(INDOOR_BIKE_DATA_UUID);
+    await bikeDataChar.startNotifications();
+    bikeDataChar.addEventListener('characteristicvaluechanged', (event: any) => {
+      const dv: DataView = event.target.value;
+      const parsed = parseFtmsIndoorBikeData(dv);
+      this.ingestTelemetry(parsed);
+    });
+
+    // Acquire Fitness Machine Control Point (0x2AD9)
+    try {
+      this.controlPointChar = await service.getCharacteristic(
+        FITNESS_MACHINE_CONTROL_POINT_UUID
+      );
+      await this.controlPointChar.startNotifications();
+      // Request Control (0x00) and Start/Resume (0x07)
+      await this.writeControlPoint(new Uint8Array([0x00]));
+      await new Promise((r) => setTimeout(r, 180));
+      await this.writeControlPoint(new Uint8Array([0x07]));
+    } catch (cpErr) {
+      console.warn('Control point setup warning:', cpErr);
+    }
+
+    this.state.connected = true;
+    this.state.reconnecting = false;
+    this.state.reconnectAttempt = 0;
+    this.state.isSimulator = false;
+    this.state.deviceName = device.name || 'Domyos Challenge Bike';
+    this.emit();
+
+    // Immediately restore current target load (Watts / Resistance) after (re)connection
+    await this.applyTargetLoad(
+      this.state.targetPowerWatts,
+      this.state.targetResistanceLevel,
+      true
+    );
+  }
+
+  private scheduleAutoReconnect(attempt: number = 1) {
+    const maxAttempts = 5;
+    if (this.manualDisconnect || !this.bleDevice || attempt > maxAttempts) {
+      this.state.connected = false;
+      this.state.reconnecting = false;
+      this.state.reconnectAttempt = 0;
+      this.state.deviceName = 'Rozłączono';
+      this.controlPointChar = null;
+      this.emit();
+      return;
+    }
+
+    const delaysMs = [1500, 3000, 5000, 8000, 12000];
+    const delay = delaysMs[Math.min(attempt - 1, delaysMs.length - 1)];
+
+    this.state.connected = false;
+    this.state.reconnecting = true;
+    this.state.reconnectAttempt = attempt;
+    this.state.deviceName = `Wznawianie BLE (${attempt}/${maxAttempts})...`;
+    this.controlPointChar = null;
+    this.emit();
+
+    this.clearReconnectTimer();
+    this.reconnectTimer = window.setTimeout(async () => {
+      if (this.manualDisconnect || !this.bleDevice) return;
+      try {
+        await this.setupFtmsGattServices(this.bleDevice);
+      } catch (err) {
+        console.warn(`BLE auto-reconnect attempt ${attempt} failed:`, err);
+        this.scheduleAutoReconnect(attempt + 1);
+      }
+    }, delay);
+  }
+
   public async connectDomyosBle(): Promise<{ ok: boolean; message: string }> {
     const nav = navigator as any;
     if (!nav.bluetooth) {
@@ -162,6 +249,9 @@ export class FtmsBikeController {
 
     try {
       this.stopSimulator();
+      this.manualDisconnect = false;
+      this.clearReconnectTimer();
+
       const device = await nav.bluetooth.requestDevice({
         filters: [{ services: [FTMS_SERVICE_UUID] }],
         optionalServices: [FTMS_SERVICE_UUID, CYCLING_POWER_SERVICE_UUID, 0x180d],
@@ -169,40 +259,20 @@ export class FtmsBikeController {
 
       this.bleDevice = device;
       device.addEventListener('gattserverdisconnected', () => {
-        this.state.connected = false;
-        this.state.deviceName = 'Rozłączono';
-        this.controlPointChar = null;
-        this.emit();
+        if (this.manualDisconnect) {
+          this.state.connected = false;
+          this.state.reconnecting = false;
+          this.state.reconnectAttempt = 0;
+          this.state.deviceName = 'Rozłączono';
+          this.controlPointChar = null;
+          this.emit();
+          return;
+        }
+        // Unexpected GATT drop during workout — initiate automatic reconnection loop
+        this.scheduleAutoReconnect(1);
       });
 
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(FTMS_SERVICE_UUID);
-
-      // Subscribe to Indoor Bike Data (0x2AD2)
-      const bikeDataChar = await service.getCharacteristic(INDOOR_BIKE_DATA_UUID);
-      await bikeDataChar.startNotifications();
-      bikeDataChar.addEventListener('characteristicvaluechanged', (event: any) => {
-        const dv: DataView = event.target.value;
-        const parsed = parseFtmsIndoorBikeData(dv);
-        this.ingestTelemetry(parsed);
-      });
-
-      // Acquire Fitness Machine Control Point (0x2AD9)
-      try {
-        this.controlPointChar = await service.getCharacteristic(FITNESS_MACHINE_CONTROL_POINT_UUID);
-        await this.controlPointChar.startNotifications();
-        // Request Control (0x00) and Start/Resume (0x07)
-        await this.writeControlPoint(new Uint8Array([0x00]));
-        await new Promise((r) => setTimeout(r, 180));
-        await this.writeControlPoint(new Uint8Array([0x07]));
-      } catch (cpErr) {
-        console.warn('Control point setup warning:', cpErr);
-      }
-
-      this.state.connected = true;
-      this.state.isSimulator = false;
-      this.state.deviceName = device.name || 'Domyos Challenge Bike';
-      this.emit();
+      await this.setupFtmsGattServices(device);
 
       return { ok: true, message: `Połączono z ${this.state.deviceName}` };
     } catch (err: any) {
@@ -224,36 +294,55 @@ export class FtmsBikeController {
         filters: [{ services: [CYCLING_POWER_SERVICE_UUID] }],
       });
       this.extPowerDevice = device;
-      device.addEventListener('gattserverdisconnected', () => {
-        this.state.externalPowerConnected = false;
-        this.state.externalPowerDeviceName = '';
-        this.state.externalPowerWatts = null;
-        this.state.powerMatchOffsetWatts = 0;
+
+      const connectExtPowerGatt = async () => {
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(CYCLING_POWER_SERVICE_UUID);
+        const powerChar = await service.getCharacteristic(CYCLING_POWER_MEASUREMENT_UUID);
+        await powerChar.startNotifications();
+        powerChar.addEventListener('characteristicvaluechanged', (event: any) => {
+          const dv: DataView = event.target.value;
+          if (dv.byteLength >= 4) {
+            const extWatts = Math.max(0, dv.getInt16(2, true));
+            this.state.externalPowerWatts = extWatts;
+            // Auto Power Match: gently adjust offset between External Power Meter and Domyos internal sensor
+            const diff = this.state.targetPowerWatts - extWatts;
+            this.state.powerMatchOffsetWatts = Math.max(
+              -50,
+              Math.min(50, Math.round(this.state.powerMatchOffsetWatts * 0.7 + diff * 0.3))
+            );
+            this.emit();
+          }
+        });
+        this.state.externalPowerConnected = true;
+        this.state.externalPowerDeviceName = device.name || 'Miernik Mocy BLE';
         this.emit();
-      });
+      };
 
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(CYCLING_POWER_SERVICE_UUID);
-      const powerChar = await service.getCharacteristic(CYCLING_POWER_MEASUREMENT_UUID);
-      await powerChar.startNotifications();
-      powerChar.addEventListener('characteristicvaluechanged', (event: any) => {
-        const dv: DataView = event.target.value;
-        if (dv.byteLength >= 4) {
-          const extWatts = Math.max(0, dv.getInt16(2, true));
-          this.state.externalPowerWatts = extWatts;
-          // Auto Power Match: gently adjust offset between External Power Meter and Domyos internal sensor
-          const diff = this.state.targetPowerWatts - extWatts;
-          this.state.powerMatchOffsetWatts = Math.max(
-            -50,
-            Math.min(50, Math.round(this.state.powerMatchOffsetWatts * 0.7 + diff * 0.3))
-          );
+      device.addEventListener('gattserverdisconnected', () => {
+        if (this.manualDisconnect) {
+          this.state.externalPowerConnected = false;
+          this.state.externalPowerDeviceName = '';
+          this.state.externalPowerWatts = null;
+          this.state.powerMatchOffsetWatts = 0;
           this.emit();
+          return;
         }
+        // Try silent auto-reconnect for external power meter
+        window.setTimeout(() => {
+          if (!this.manualDisconnect && this.extPowerDevice) {
+            connectExtPowerGatt().catch(() => {
+              this.state.externalPowerConnected = false;
+              this.state.externalPowerDeviceName = '';
+              this.state.externalPowerWatts = null;
+              this.state.powerMatchOffsetWatts = 0;
+              this.emit();
+            });
+          }
+        }, 2000);
       });
 
-      this.state.externalPowerConnected = true;
-      this.state.externalPowerDeviceName = device.name || 'Miernik Mocy BLE';
-      this.emit();
+      await connectExtPowerGatt();
       return { ok: true, message: `Zewnętrzny pomiar mocy aktywny (${this.state.externalPowerDeviceName})` };
     } catch (err: any) {
       return { ok: false, message: err?.message || 'Nie połączono zewnętrznego miernika mocy.' };
@@ -262,7 +351,10 @@ export class FtmsBikeController {
 
   public startSimulator() {
     this.disconnectBle();
+    this.manualDisconnect = false;
     this.state.connected = true;
+    this.state.reconnecting = false;
+    this.state.reconnectAttempt = 0;
     this.state.isSimulator = true;
     this.state.deviceName = 'Domyos Challenge Bike (Symulator FTMS)';
     this.state.heartRateBpm = 118;
@@ -303,6 +395,8 @@ export class FtmsBikeController {
   }
 
   public disconnectBle() {
+    this.manualDisconnect = true;
+    this.clearReconnectTimer();
     this.stopSimulator();
     try {
       if (this.bleDevice?.gatt?.connected) {
@@ -315,6 +409,8 @@ export class FtmsBikeController {
       // ignore
     }
     this.state.connected = false;
+    this.state.reconnecting = false;
+    this.state.reconnectAttempt = 0;
     this.state.isSimulator = false;
     this.state.deviceName = 'Brak połączenia';
     this.controlPointChar = null;

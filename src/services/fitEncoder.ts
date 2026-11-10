@@ -28,9 +28,122 @@ function toFitTimestamp(unixMs: number): number {
   return Math.max(0, Math.floor(unixMs / 1000) - FIT_EPOCH_OFFSET_SEC);
 }
 
+interface ComputedIntervalLap {
+  blockIndex: number;
+  startFitTs: number;
+  endFitTs: number;
+  startIso: string;
+  durationSec: number;
+  distanceMeters: number;
+  avgPowerWatts: number;
+  maxPowerWatts: number;
+  avgHrBpm: number;
+  maxHrBpm: number;
+  avgCadenceRpm: number;
+  records: CompletedActivity['records'];
+}
+
+/**
+ * Segments 1Hz telemetry records by `blockIndex` transitions so each workout interval
+ * (Warmup, Work 1, Recovery 1, Work 2, Cooldown, etc.) becomes a distinct FIT/TCX Lap.
+ */
+function buildIntervalLaps(
+  activity: CompletedActivity,
+  startFitTs: number
+): ComputedIntervalLap[] {
+  const recs = activity.records || [];
+  if (recs.length === 0) {
+    return [
+      {
+        blockIndex: 0,
+        startFitTs,
+        endFitTs: startFitTs + Math.max(1, activity.durationSec),
+        startIso: new Date(activity.startedAtIso).toISOString(),
+        durationSec: Math.max(1, activity.durationSec),
+        distanceMeters: Math.max(0, activity.totalDistanceMeters),
+        avgPowerWatts: Math.max(0, Math.round(activity.avgPowerWatts)),
+        maxPowerWatts: Math.max(0, Math.round(activity.maxPowerWatts)),
+        avgHrBpm: Math.max(30, Math.round(activity.avgHrBpm || 120)),
+        maxHrBpm: Math.max(30, Math.round(activity.maxHrBpm || 140)),
+        avgCadenceRpm: Math.max(0, Math.round(activity.avgCadenceRpm || 85)),
+        records: [],
+      },
+    ];
+  }
+
+  const rawGroups: CompletedActivity['records'][] = [];
+  let currentGroup: CompletedActivity['records'] = [recs[0]];
+
+  for (let i = 1; i < recs.length; i++) {
+    const prev = recs[i - 1];
+    const curr = recs[i];
+    if ((curr.blockIndex ?? 0) !== (prev.blockIndex ?? 0)) {
+      rawGroups.push(currentGroup);
+      currentGroup = [curr];
+    } else {
+      currentGroup.push(curr);
+    }
+  }
+  if (currentGroup.length > 0) {
+    rawGroups.push(currentGroup);
+  }
+
+  let prevCumulativeDistance = 0;
+
+  return rawGroups.map((group, idx) => {
+    const first = group[0];
+    const last = group[group.length - 1];
+    const firstElapsed = Math.max(0, (first.elapsedSec || 1) - 1);
+    const lastElapsed = Math.max(firstElapsed + 1, last.elapsedSec || firstElapsed + group.length);
+    const lapStartFitTs = startFitTs + firstElapsed;
+    const lapEndFitTs = startFitTs + lastElapsed;
+    const durationSec = Math.max(1, lapEndFitTs - lapStartFitTs);
+
+    const endDist = Math.max(prevCumulativeDistance, last.distanceMeters || 0);
+    const lapDistanceMeters = Math.max(0, endDist - prevCumulativeDistance);
+    prevCumulativeDistance = endDist;
+
+    let sumPower = 0;
+    let maxPower = 0;
+    let sumHr = 0;
+    let maxHr = 0;
+    let sumCad = 0;
+
+    for (const r of group) {
+      const p = Math.max(0, Math.round(r.powerWatts || 0));
+      const h = Math.max(30, Math.round(r.heartRateBpm || activity.avgHrBpm || 120));
+      const c = Math.max(0, Math.round(r.cadenceRpm || 0));
+      sumPower += p;
+      if (p > maxPower) maxPower = p;
+      sumHr += h;
+      if (h > maxHr) maxHr = h;
+      sumCad += c;
+    }
+
+    const n = group.length;
+    const baseStartMs = new Date(activity.startedAtIso).getTime() || Date.now();
+
+    return {
+      blockIndex: first.blockIndex ?? idx,
+      startFitTs: lapStartFitTs,
+      endFitTs: lapEndFitTs,
+      startIso: new Date(baseStartMs + firstElapsed * 1000).toISOString(),
+      durationSec,
+      distanceMeters: lapDistanceMeters,
+      avgPowerWatts: Math.round(sumPower / n),
+      maxPowerWatts: maxPower,
+      avgHrBpm: Math.min(240, Math.max(30, Math.round(sumHr / n))),
+      maxHrBpm: Math.min(240, Math.max(30, maxHr)),
+      avgCadenceRpm: Math.min(220, Math.max(0, Math.round(sumCad / n))),
+      records: group,
+    };
+  });
+}
+
 /**
  * Encodes a CompletedActivity into a genuine binary Garmin .FIT file (Uint8Array & Blob)
- * containing FileId (0), Record (20) 1Hz telemetry, Lap (19), Session (18), and Activity (34) messages.
+ * containing FileId (0), Record (20) 1Hz telemetry, per-interval Lap (19) messages,
+ * Session (18) with num_laps, and Activity (34) messages.
  */
 export function encodeActivityToFitBytes(activity: CompletedActivity): Uint8Array {
   const dataChunks: number[] = [];
@@ -78,7 +191,7 @@ export function encodeActivityToFitBytes(activity: CompletedActivity): Uint8Arra
   pushUint8(3);   pushUint8(1); pushUint8(0x02); // heart_rate uint8 (bpm)
   pushUint8(4);   pushUint8(1); pushUint8(0x02); // cadence uint8 (rpm)
 
-  // Data Messages: records
+  // Data Messages: records (1Hz stream)
   for (let i = 0; i < activity.records.length; i++) {
     const rec = activity.records[i];
     const recTs = startFitTs + (rec.elapsedSec || i);
@@ -101,55 +214,65 @@ export function encodeActivityToFitBytes(activity: CompletedActivity): Uint8Arra
   const totalDistanceScaled = Math.round(activity.totalDistanceMeters * 100);
   const avgSpeedScaled = Math.round((activity.avgSpeedKmh / 3.6) * 1000);
 
-  // 3. Definition Message: lap (Global Mesg 19, Local 2)
+  // 3. Definition Message: lap (Global Mesg 19, Local 2) — emitted once, followed by N interval Lap messages
   pushUint8(0x42);
   pushUint8(0x00);
   pushUint8(0x00);
   pushUint16LE(19);
-  pushUint8(10);
-  pushUint8(253); pushUint8(4); pushUint8(0x86);
-  pushUint8(2);   pushUint8(4); pushUint8(0x86);
-  pushUint8(7);   pushUint8(4); pushUint8(0x86);
-  pushUint8(8);   pushUint8(4); pushUint8(0x86);
-  pushUint8(9);   pushUint8(4); pushUint8(0x86);
-  pushUint8(19);  pushUint8(2); pushUint8(0x84);
-  pushUint8(20);  pushUint8(2); pushUint8(0x84);
-  pushUint8(15);  pushUint8(1); pushUint8(0x02);
-  pushUint8(16);  pushUint8(1); pushUint8(0x02);
-  pushUint8(17);  pushUint8(1); pushUint8(0x02);
+  pushUint8(11);
+  pushUint8(253); pushUint8(4); pushUint8(0x86); // timestamp (end of lap)
+  pushUint8(2);   pushUint8(4); pushUint8(0x86); // start_time
+  pushUint8(7);   pushUint8(4); pushUint8(0x86); // total_elapsed_time (ms)
+  pushUint8(8);   pushUint8(4); pushUint8(0x86); // total_timer_time (ms)
+  pushUint8(9);   pushUint8(4); pushUint8(0x86); // total_distance (cm)
+  pushUint8(19);  pushUint8(2); pushUint8(0x84); // avg_power (W)
+  pushUint8(20);  pushUint8(2); pushUint8(0x84); // max_power (W)
+  pushUint8(254); pushUint8(2); pushUint8(0x84); // message_index (lap index 0..N-1)
+  pushUint8(15);  pushUint8(1); pushUint8(0x02); // avg_heart_rate (bpm)
+  pushUint8(16);  pushUint8(1); pushUint8(0x02); // max_heart_rate (bpm)
+  pushUint8(17);  pushUint8(1); pushUint8(0x02); // avg_cadence (rpm)
 
-  pushUint8(0x02);
-  pushUint32LE(endFitTs);
-  pushUint32LE(startFitTs);
-  pushUint32LE(totalTimerTimeScaled);
-  pushUint32LE(totalTimerTimeScaled);
-  pushUint32LE(totalDistanceScaled);
-  pushUint16LE(activity.avgPowerWatts);
-  pushUint16LE(activity.maxPowerWatts);
-  pushUint8(activity.avgHrBpm);
-  pushUint8(activity.maxHrBpm);
-  pushUint8(activity.avgCadenceRpm);
+  const intervalLaps = buildIntervalLaps(activity, startFitTs);
+  for (let lapIdx = 0; lapIdx < intervalLaps.length; lapIdx++) {
+    const lap = intervalLaps[lapIdx];
+    const lapTimeScaled = Math.max(1000, Math.round(lap.durationSec * 1000));
+    const lapDistScaled = Math.max(0, Math.round(lap.distanceMeters * 100));
 
-  // 4. Definition Message: session (Global Mesg 18, Local 3)
+    pushUint8(0x02);
+    pushUint32LE(lap.endFitTs);
+    pushUint32LE(lap.startFitTs);
+    pushUint32LE(lapTimeScaled);
+    pushUint32LE(lapTimeScaled);
+    pushUint32LE(lapDistScaled);
+    pushUint16LE(Math.max(0, Math.min(2500, lap.avgPowerWatts)));
+    pushUint16LE(Math.max(0, Math.min(2500, lap.maxPowerWatts)));
+    pushUint16LE(lapIdx);
+    pushUint8(lap.avgHrBpm);
+    pushUint8(lap.maxHrBpm);
+    pushUint8(lap.avgCadenceRpm);
+  }
+
+  // 4. Definition Message: session (Global Mesg 18, Local 3) — includes field 25 (num_laps)
   pushUint8(0x43);
   pushUint8(0x00);
   pushUint8(0x00);
   pushUint16LE(18);
-  pushUint8(14);
-  pushUint8(253); pushUint8(4); pushUint8(0x86);
-  pushUint8(2);   pushUint8(4); pushUint8(0x86);
-  pushUint8(7);   pushUint8(4); pushUint8(0x86);
-  pushUint8(8);   pushUint8(4); pushUint8(0x86);
-  pushUint8(9);   pushUint8(4); pushUint8(0x86);
-  pushUint8(11);  pushUint8(2); pushUint8(0x84);
-  pushUint8(14);  pushUint8(2); pushUint8(0x84);
-  pushUint8(20);  pushUint8(2); pushUint8(0x84);
-  pushUint8(21);  pushUint8(2); pushUint8(0x84);
-  pushUint8(34);  pushUint8(2); pushUint8(0x84);
-  pushUint8(35);  pushUint8(2); pushUint8(0x84);
-  pushUint8(5);   pushUint8(1); pushUint8(0x00);
-  pushUint8(6);   pushUint8(1); pushUint8(0x00);
-  pushUint8(16);  pushUint8(1); pushUint8(0x02);
+  pushUint8(15);
+  pushUint8(253); pushUint8(4); pushUint8(0x86); // timestamp
+  pushUint8(2);   pushUint8(4); pushUint8(0x86); // start_time
+  pushUint8(7);   pushUint8(4); pushUint8(0x86); // total_elapsed_time
+  pushUint8(8);   pushUint8(4); pushUint8(0x86); // total_timer_time
+  pushUint8(9);   pushUint8(4); pushUint8(0x86); // total_distance
+  pushUint8(11);  pushUint8(2); pushUint8(0x84); // total_calories
+  pushUint8(14);  pushUint8(2); pushUint8(0x84); // avg_speed
+  pushUint8(20);  pushUint8(2); pushUint8(0x84); // avg_power
+  pushUint8(21);  pushUint8(2); pushUint8(0x84); // max_power
+  pushUint8(25);  pushUint8(2); pushUint8(0x84); // num_laps (uint16)
+  pushUint8(34);  pushUint8(2); pushUint8(0x84); // normalized_power
+  pushUint8(35);  pushUint8(2); pushUint8(0x84); // training_stress_score
+  pushUint8(5);   pushUint8(1); pushUint8(0x00); // sport (2 = cycling)
+  pushUint8(6);   pushUint8(1); pushUint8(0x00); // sub_sport (6 = indoor_cycling)
+  pushUint8(16);  pushUint8(1); pushUint8(0x02); // avg_heart_rate
 
   pushUint8(0x03);
   pushUint32LE(endFitTs);
@@ -161,6 +284,7 @@ export function encodeActivityToFitBytes(activity: CompletedActivity): Uint8Arra
   pushUint16LE(avgSpeedScaled);
   pushUint16LE(activity.avgPowerWatts);
   pushUint16LE(activity.maxPowerWatts);
+  pushUint16LE(intervalLaps.length);
   pushUint16LE(activity.normalizedPowerWatts);
   pushUint16LE(Math.round(activity.tss * 10));
   pushUint8(2); // cycling
@@ -284,14 +408,19 @@ export function downloadActivityFitFile(activity: CompletedActivity): void {
 }
 
 /**
- * Generates Garmin Training Center XML (.TCX) with Power, HR, and Cadence extensions
+ * Generates Garmin Training Center XML (.TCX) with per-interval Laps, Power, HR, and Cadence extensions
  */
 export function downloadActivityTcxFile(activity: CompletedActivity): void {
   const startIso = new Date(activity.startedAtIso).toISOString();
-  const trackpoints = activity.records
-    .map((r) => {
-      const ptIso = new Date(r.timestampMs).toISOString();
-      return `          <Trackpoint>
+  const startMs = new Date(activity.startedAtIso).getTime() || Date.now();
+  const intervalLaps = buildIntervalLaps(activity, toFitTimestamp(startMs));
+
+  const lapsXml = intervalLaps
+    .map((lap) => {
+      const trackpoints = lap.records
+        .map((r) => {
+          const ptIso = new Date(r.timestampMs).toISOString();
+          return `          <Trackpoint>
             <Time>${ptIso}</Time>
             <DistanceMeters>${r.distanceMeters.toFixed(1)}</DistanceMeters>
             <HeartRateBpm><Value>${Math.round(r.heartRateBpm)}</Value></HeartRateBpm>
@@ -303,6 +432,30 @@ export function downloadActivityTcxFile(activity: CompletedActivity): void {
               </ns3:TPX>
             </Extensions>
           </Trackpoint>`;
+        })
+        .join('\n');
+
+      const lapCalories = Math.max(
+        1,
+        Math.round(
+          (activity.caloriesKcal * lap.durationSec) /
+            Math.max(1, activity.durationSec)
+        )
+      );
+
+      return `      <Lap StartTime="${lap.startIso}">
+        <TotalTimeSeconds>${lap.durationSec}</TotalTimeSeconds>
+        <DistanceMeters>${lap.distanceMeters.toFixed(1)}</DistanceMeters>
+        <Calories>${lapCalories}</Calories>
+        <AverageHeartRateBpm><Value>${lap.avgHrBpm}</Value></AverageHeartRateBpm>
+        <MaximumHeartRateBpm><Value>${lap.maxHrBpm}</Value></MaximumHeartRateBpm>
+        <Intensity>Active</Intensity>
+        <Cadence>${lap.avgCadenceRpm}</Cadence>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+${trackpoints}
+        </Track>
+      </Lap>`;
     })
     .join('\n');
 
@@ -315,19 +468,7 @@ export function downloadActivityTcxFile(activity: CompletedActivity): void {
   <Activities>
     <Activity Sport="Biking">
       <Id>${startIso}</Id>
-      <Lap StartTime="${startIso}">
-        <TotalTimeSeconds>${activity.durationSec}</TotalTimeSeconds>
-        <DistanceMeters>${activity.totalDistanceMeters}</DistanceMeters>
-        <Calories>${activity.caloriesKcal}</Calories>
-        <AverageHeartRateBpm><Value>${activity.avgHrBpm}</Value></AverageHeartRateBpm>
-        <MaximumHeartRateBpm><Value>${activity.maxHrBpm}</Value></MaximumHeartRateBpm>
-        <Intensity>Active</Intensity>
-        <Cadence>${activity.avgCadenceRpm}</Cadence>
-        <TriggerMethod>Manual</TriggerMethod>
-        <Track>
-${trackpoints}
-        </Track>
-      </Lap>
+${lapsXml}
     </Activity>
   </Activities>
 </TrainingCenterDatabase>`;

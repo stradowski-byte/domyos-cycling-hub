@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan przebudowy parsera i formatera konfiguracji Firebase tak, aby wyswietlal i przyjmowal dokladny format generowany przez konsole Firebase (klucze bez cudzyslowow, obsluga wklejenia bez nawiasow klamrowych {}, z pelnego skryptu SDK lub czystego obiektu).",
-  "updatedAt":  "2026-11-09T19:37:07.084872657Z",
+  "summary":  "Plan wdrożenia usprawnień backendu Firebase (zapisy paczkowe writeBatch + kolejka synchronizacji Offline-First), wielookrążeniowych plików .FIT (osobny Lap dla każdego interwału), automatycznego wznawiania połączenia Bluetooth FTMS (Auto-Reconnect) oraz nowych funkcji kokpitu treningowego (Alert 10s przed kolejnym interwałem, celownik kadencji RPM i wskaźnik dryfu tętna Aerobic Decoupling Pa:Hr na żywo).",
+  "updatedAt":  "2026-11-10T11:50:57.090953886Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

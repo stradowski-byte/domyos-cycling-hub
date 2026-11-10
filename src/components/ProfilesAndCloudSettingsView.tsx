@@ -22,6 +22,12 @@ import {
   Users,
   Activity,
   GitBranch,
+  Tag,
+  HardDrive,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  Wrench,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -34,11 +40,16 @@ import {
 import {
   CURRENT_APP_VERSION,
   downloadLocalOpfsFile,
+  estimateFirestoreSparkStorage,
   listLocalOpfsFiles,
   LocalOpfsFileEntry,
   readLocalOpfsTextFile,
   writeLocalOpfsWorkoutTextFile,
 } from '../services/firebaseSyncService';
+import {
+  DEFAULT_WORKOUT_TAGS,
+  inferWorkoutTags,
+} from '../services/rampAndPhysiologyEngine';
 import {
   activeConfig,
   clearCustomFirebaseConfig,
@@ -52,6 +63,10 @@ interface ProfilesAndCloudSettingsViewProps {
   profiles: Record<ProfileId, AthleteProfile>;
   workouts: StructuredWorkout[];
   activities: CompletedActivity[];
+  workoutTags?: string[];
+  onUpdateWorkoutTags?: (nextTags: string[]) => void;
+  onEnsureFirestoreCollections?: () => void;
+  collectionsInitialized?: boolean;
   activeProfileId: ProfileId;
   themeMode: AppThemeMode;
   onChangeThemeMode: (mode: AppThemeMode) => void;
@@ -82,6 +97,10 @@ export const ProfilesAndCloudSettingsView: React.FC<
   profiles,
   workouts,
   activities,
+  workoutTags = DEFAULT_WORKOUT_TAGS,
+  onUpdateWorkoutTags,
+  onEnsureFirestoreCollections,
+  collectionsInitialized = true,
   activeProfileId = 'default',
   themeMode,
   onChangeThemeMode,
@@ -103,10 +122,48 @@ export const ProfilesAndCloudSettingsView: React.FC<
 }) => {
   const [showCustomFirebaseConfig, setShowCustomFirebaseConfig] =
     useState(false);
+  const [showAdvancedTools, setShowAdvancedTools] = useState(false);
   const [firebaseJsonInput, setFirebaseJsonInput] = useState(() =>
     formatFirebaseConfigText(activeConfig)
   );
+  const [newTagInput, setNewTagInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const sparkStorage = estimateFirestoreSparkStorage({
+    profiles,
+    workouts,
+    activities,
+    tags: workoutTags,
+    collectionsInitialized,
+  });
+
+  const handleAddCustomTag = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = newTagInput.trim();
+    if (!cleaned) return;
+    if (workoutTags.some((t) => t.toLowerCase() === cleaned.toLowerCase())) {
+      onNotifyToast?.(`Tag "${cleaned}" już istnieje na liście kategorii.`);
+      return;
+    }
+    const next = [...workoutTags, cleaned];
+    onUpdateWorkoutTags?.(next);
+    setNewTagInput('');
+    onNotifyToast?.(
+      `Dodano nową kategorię "${cleaned}"! Jest już widoczna w wyborze treningu.`
+    );
+  };
+
+  const handleRemoveCustomTag = (tagToRemove: string) => {
+    if (DEFAULT_WORKOUT_TAGS.includes(tagToRemove)) {
+      onNotifyToast?.(
+        'Domyślne kategorie fizjologiczne są chronione. Możesz usuwać własne dodane tagi.'
+      );
+      return;
+    }
+    const next = workoutTags.filter((t) => t !== tagToRemove);
+    onUpdateWorkoutTags?.(next);
+    onNotifyToast?.(`Usunięto kategorię "${tagToRemove}".`);
+  };
 
   // Local OPFS File Explorer & Live .TXT Editor State
   const [opfsFiles, setOpfsFiles] = useState<LocalOpfsFileEntry[]>([]);
@@ -422,7 +479,57 @@ export const ProfilesAndCloudSettingsView: React.FC<
           </div>
         </div>
 
-        {/* Manual Sync & Backup Actions */}
+        {/* ===================================================================
+            FIREBASE SPARK (FREE PLAN 1 GiB / 1024 MB) STORAGE USAGE BAR
+           =================================================================== */}
+        <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-4 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Wolne miejsce w projekcie Firebase (Darmowy Plan Spark 1 GiB)</span>
+            </div>
+            <div className="text-xs font-mono-tabular font-bold text-emerald-400">
+              Użyto {sparkStorage.usedMb.toFixed(2)} MB / {sparkStorage.limitMb} MB (Pozostało {sparkStorage.remainingMb.toFixed(2)} MB)
+            </div>
+          </div>
+
+          <div className="w-full h-3 rounded-full bg-slate-800/90 overflow-hidden p-0.5">
+            <div
+              className={`h-full rounded-full transition-all ${
+                sparkStorage.usedPercent > 90
+                  ? 'bg-rose-500'
+                  : sparkStorage.usedPercent > 70
+                  ? 'bg-amber-500'
+                  : 'bg-emerald-500'
+              }`}
+              style={{
+                width: `${Math.max(1.2, Math.min(100, sparkStorage.usedPercent))}%`,
+              }}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+            <span>
+              Kolekcje Firestore:{' '}
+              <code className="text-emerald-400">hubConfig</code> ·{' '}
+              <code className="text-emerald-400">profiles</code> ·{' '}
+              <code className="text-emerald-400">plannedWorkouts</code> ·{' '}
+              <code className="text-emerald-400">completedWorkouts</code>
+            </span>
+            {onEnsureFirestoreCollections && (
+              <button
+                type="button"
+                onClick={onEnsureFirestoreCollections}
+                disabled={isSyncingFirebase}
+                className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-4"
+              >
+                Sprawdź / Utwórz brakujące kolekcje (bez usuwania)
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Everyday Sync Actions */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -450,83 +557,259 @@ export const ProfilesAndCloudSettingsView: React.FC<
               />
               <span>Odśwież z Firebase</span>
             </button>
-
-            <button
-              onClick={handleExportFullBackupJson}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Eksport Kopii (.JSON)</span>
-            </button>
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Import Kopii (.JSON)</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleImportBackupFileChange}
-              className="hidden"
-            />
           </div>
-
-          <button
-            onClick={() => setShowCustomFirebaseConfig((v) => !v)}
-            className="min-h-[36px] px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-400 hover:text-white transition-colors"
-          >
-            {showCustomFirebaseConfig
-              ? 'Ukryj JSON Firebase'
-              : 'Pokaż / Zmień JSON Firebase'}
-          </button>
         </div>
-
-        {/* Expandable Predefined Firebase JSON Inspector / Override */}
-        {showCustomFirebaseConfig && (
-          <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-bold text-white">
-                Konfiguracja JSON projektu Firebase (
-                {isUsingCustomConfig
-                  ? 'Zapisana w pamięci urządzenia PWA (localStorage)'
-                  : 'Środowisko deweloperskie AI Studio'}
-                )
-              </div>
-              {isUsingCustomConfig && (
-                <button
-                  onClick={clearCustomFirebaseConfig}
-                  className="px-3 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-xs font-semibold"
-                >
-                  Usuń JSON z pamięci urządzenia
-                </button>
-              )}
-            </div>
-            <textarea
-              rows={9}
-              value={firebaseJsonInput}
-              onChange={(e) => setFirebaseJsonInput(e.target.value)}
-              placeholder={FIREBASE_CONSOLE_PLACEHOLDER}
-              className="w-full p-3 rounded-xl bg-[#131B26] border border-slate-700 font-mono-tabular text-xs text-emerald-300 focus:border-emerald-500 focus:outline-none"
-            />
-            <div className="flex justify-end">
-              <button
-                onClick={handleSaveCustomFirebase}
-                className="min-h-[38px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
-              >
-                Zapisz w pamięci urządzenia i przeładuj
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* =====================================================================
-          2. NATIVE GITHUB ACTIONS DEPLOYMENT & PWA AUTO-UPDATE
+          1B. WORKOUT TAGS & CATEGORIES MANAGER (CREATES DROPDOWNS ON MAIN VIEW)
          ===================================================================== */}
+      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
+        <div className="space-y-1 border-b border-slate-800 pb-3.5">
+          <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+            <Tag className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span>Menedżer Tagów i Kategorii Treningowych</span>
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Każdy tag tworzy rozwijaną kategorię (dropdown) w zakładce{' '}
+            <strong className="text-white">1. Wybór Treningu</strong>. Treningi
+            mogą mieć przypisanych kilka tagów jednocześnie i wyświetlać się w
+            wielu kategoriach.
+          </p>
+        </div>
+
+        {/* Add New Tag Form */}
+        <form
+          onSubmit={handleAddCustomTag}
+          className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
+        >
+          <input
+            type="text"
+            value={newTagInput}
+            onChange={(e) => setNewTagInput(e.target.value)}
+            placeholder="Wpisz nazwę nowego tagu / kategorii (np. Siła, Sprinty, Kadencja, Zima)..."
+            className="flex-1 h-11 px-3.5 rounded-xl bg-[#0B0F17] border border-slate-700 text-xs text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-colors"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Dodaj Tag / Kategorię</span>
+          </button>
+        </form>
+
+        {/* Active Tags List with Workout Counts */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {workoutTags.map((tag) => {
+            const count = workouts.filter((w) =>
+              inferWorkoutTags(w).includes(tag)
+            ).length;
+            const isDefault = DEFAULT_WORKOUT_TAGS.includes(tag);
+
+            return (
+              <div
+                key={tag}
+                className="rounded-xl bg-[#0B0F17] border border-slate-800 px-3.5 py-2.5 flex items-center justify-between gap-2 min-w-0"
+              >
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">
+                    {tag}
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono-tabular">
+                    {count}{' '}
+                    {count === 1
+                      ? 'trening'
+                      : count >= 2 && count <= 4
+                      ? 'treningi'
+                      : 'treningów'}{' '}
+                    · {isDefault ? 'Domyślna' : 'Własny tag'}
+                  </div>
+                </div>
+
+                {!isDefault && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCustomTag(tag)}
+                    className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0"
+                    title="Usuń własny tag"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* =====================================================================
+          2. EYE-FRIENDLY LOW-CONTRAST THEME SWITCHER (SOFT LIGHT & SOFT DARK)
+         ===================================================================== */}
+      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 min-w-0 overflow-hidden">
+        <div className="space-y-1 min-w-0">
+          <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+            {themeMode === 'soft-light' ? (
+              <Sun className="w-5 h-5 text-amber-400 shrink-0" />
+            ) : (
+              <Moon className="w-5 h-5 text-sky-400 shrink-0" />
+            )}
+            <span className="truncate">
+              Motyw Ochrony Wzroku (Niski Kontrast)
+            </span>
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Wybierz jasną gamę szarości i ciepłych bieli lub zbalansowany ciemny
+            grafit.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 sm:flex items-center gap-1.5 p-1 rounded-xl bg-[#0B0F17] border border-slate-800 w-full sm:w-auto min-w-0">
+          <button
+            onClick={() => onChangeThemeMode('soft-light')}
+            className={`min-h-[40px] px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors truncate min-w-0 ${
+              themeMode === 'soft-light'
+                ? 'bg-emerald-500 text-slate-950'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Sun className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden truncate">Jasny</span>
+            <span className="hidden sm:inline">Jasny (Ciepła Biel)</span>
+          </button>
+          <button
+            onClick={() => onChangeThemeMode('soft-dark')}
+            className={`min-h-[40px] px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors truncate min-w-0 ${
+              themeMode === 'soft-dark'
+                ? 'bg-emerald-500 text-slate-950'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Moon className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden truncate">Ciemny</span>
+            <span className="hidden sm:inline">Ciemny (Grafit)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* =====================================================================
+          3. COLLAPSIBLE ACCORDION: ADVANCED TECHNICAL TOOLS (OPFS, FIREBASE CONFIG, BACKUP)
+         ===================================================================== */}
+      <div className="rounded-2xl bg-[#131B26] border border-slate-800 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowAdvancedTools((v) => !v)}
+          className="w-full min-h-[58px] px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-800/30 transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-colors ${
+                showAdvancedTools
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                  : 'bg-[#0B0F17] text-slate-300 border-slate-800'
+              }`}
+            >
+              {showAdvancedTools ? (
+                <ChevronDown className="w-5 h-5" />
+              ) : (
+                <ChevronRight className="w-5 h-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="truncate">
+                  Zaawansowane Narzędzia Techniczne (OPFS, Konfiguracja Firebase, Backup .JSON)
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                Przeglądarka plików lokalnych OPFS ({opfsFiles.length} plików), edycja firebaseConfig, ręczny eksport/import JSON i linki deweloperskie
+              </p>
+            </div>
+          </div>
+
+          <span className="text-xs font-semibold text-emerald-400 shrink-0 hidden sm:inline">
+            {showAdvancedTools ? 'Zwiń' : 'Rozwiń narzędzia'}
+          </span>
+        </button>
+
+        {showAdvancedTools && (
+          <div className="border-t border-slate-800 p-4 sm:p-5 space-y-5 bg-[#0B0F17]/40">
+            {/* Manual JSON Backup + Firebase Config Toggle */}
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleExportFullBackupJson}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Eksport Kopii (.JSON)</span>
+                  </button>
+
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Import Kopii (.JSON)</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportBackupFileChange}
+                    className="hidden"
+                  />
+                </div>
+
+                <button
+                  onClick={() => setShowCustomFirebaseConfig((v) => !v)}
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#0B0F17] hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-emerald-300 transition-colors"
+                >
+                  {showCustomFirebaseConfig
+                    ? 'Ukryj edytor firebaseConfig'
+                    : 'Pokaż / Zmień firebaseConfig'}
+                </button>
+              </div>
+
+              {showCustomFirebaseConfig && (
+                <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-bold text-white">
+                      Konfiguracja projektu Firebase (
+                      {isUsingCustomConfig
+                        ? 'Zapisana w pamięci urządzenia PWA (localStorage)'
+                        : 'Środowisko deweloperskie AI Studio'}
+                      )
+                    </div>
+                    {isUsingCustomConfig && (
+                      <button
+                        onClick={clearCustomFirebaseConfig}
+                        className="px-3 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-xs font-semibold"
+                      >
+                        Usuń konfigurację z pamięci urządzenia
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    rows={9}
+                    value={firebaseJsonInput}
+                    onChange={(e) => setFirebaseJsonInput(e.target.value)}
+                    placeholder={FIREBASE_CONSOLE_PLACEHOLDER}
+                    className="w-full p-3 rounded-xl bg-[#131B26] border border-slate-700 font-mono-tabular text-xs text-emerald-300 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleSaveCustomFirebase}
+                      className="min-h-[38px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
+                    >
+                      Zapisz w pamięci urządzenia i przeładuj
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
       <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 border-b border-slate-800 pb-4">
           <div className="space-y-1 min-w-0">
@@ -623,55 +906,6 @@ export const ProfilesAndCloudSettingsView: React.FC<
             </div>
             <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" />
           </a>
-        </div>
-      </div>
-
-      {/* =====================================================================
-          3. EYE-FRIENDLY LOW-CONTRAST THEME SWITCHER (SOFT LIGHT & SOFT DARK)
-         ===================================================================== */}
-      <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 min-w-0 overflow-hidden">
-        <div className="space-y-1 min-w-0">
-          <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-            {themeMode === 'soft-light' ? (
-              <Sun className="w-5 h-5 text-amber-400 shrink-0" />
-            ) : (
-              <Moon className="w-5 h-5 text-sky-400 shrink-0" />
-            )}
-            <span className="truncate">
-              Motyw Ochrony Wzroku (Niski Kontrast)
-            </span>
-          </h2>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Wybierz jasną gamę szarości i ciepłych bieli lub zbalansowany ciemny
-            grafit.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 sm:flex items-center gap-1.5 p-1 rounded-xl bg-[#0B0F17] border border-slate-800 w-full sm:w-auto min-w-0">
-          <button
-            onClick={() => onChangeThemeMode('soft-light')}
-            className={`min-h-[40px] px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors truncate min-w-0 ${
-              themeMode === 'soft-light'
-                ? 'bg-emerald-500 text-slate-950'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Sun className="w-4 h-4 shrink-0" />
-            <span className="sm:hidden truncate">Jasny</span>
-            <span className="hidden sm:inline">Jasny (Ciepła Biel)</span>
-          </button>
-          <button
-            onClick={() => onChangeThemeMode('soft-dark')}
-            className={`min-h-[40px] px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors truncate min-w-0 ${
-              themeMode === 'soft-dark'
-                ? 'bg-emerald-500 text-slate-950'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Moon className="w-4 h-4 shrink-0" />
-            <span className="sm:hidden truncate">Ciemny</span>
-            <span className="hidden sm:inline">Ciemny (Grafit)</span>
-          </button>
         </div>
       </div>
 
@@ -803,6 +1037,9 @@ export const ProfilesAndCloudSettingsView: React.FC<
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
           </div>
         )}
       </div>

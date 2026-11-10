@@ -104,6 +104,8 @@ export interface StructuredWorkout {
   name: string;
   description: string;
   category: 'Endurance' | 'Threshold' | 'VO2Max' | 'RampTest' | 'Recovery' | 'Custom';
+  /** Multiple category tags so a workout can appear in several collapsible categories */
+  tags?: string[];
   scheduledDate?: string; // YYYY-MM-DD
   source: 'local' | 'intervals_library' | 'intervals_calendar' | 'firebase';
   externalId?: string;
@@ -177,6 +179,8 @@ export type ControlMode = 'erg_watts' | 'resistance_level';
 
 export interface LiveBikeTelemetry {
   connected: boolean;
+  reconnecting?: boolean;
+  reconnectAttempt?: number;
   deviceName: string;
   isSimulator: boolean;
   externalPowerConnected: boolean;

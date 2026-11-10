@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Heart,
   Zap,
@@ -10,39 +10,59 @@ import {
   Activity,
   Cloud,
   ShieldCheck,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import {
   AthleteProfile,
+  CompletedActivity,
   OfflineTrainingMode,
   ProfileId,
 } from '../types/cycling';
 import {
   buildHrZonesFromMax,
+  buildPowerZonesFromFtp,
+  estimateSuggestedFtpFromHistory,
   PROFILE_AVATAR_COLORS,
 } from '../services/rampAndPhysiologyEngine';
 
 interface AthleteProfilesViewProps {
   activeProfile: AthleteProfile;
+  activities?: CompletedActivity[];
   onUpdateProfile: (id: ProfileId, updated: AthleteProfile) => void;
   isSyncingIntervals: boolean;
   onSyncFromIntervalsIcu: () => void;
   onOpenFastUserSwitcher?: () => void;
   onRefreshGoogleFitToken?: () => void;
+  onNotifyToast?: (msg: string) => void;
 }
 
 export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
   activeProfile,
+  activities = [],
   onUpdateProfile,
   isSyncingIntervals,
   onSyncFromIntervalsIcu,
   onOpenFastUserSwitcher,
   onRefreshGoogleFitToken,
+  onNotifyToast,
 }) => {
+  const [showDetailedZoneTables, setShowDetailedZoneTables] = useState(false);
+
+  const suggestedFtp = useMemo(
+    () => estimateSuggestedFtpFromHistory(activities, activeProfile),
+    [activities, activeProfile]
+  );
+
   const handleFieldChange = (patch: Partial<AthleteProfile>) => {
     const next: AthleteProfile = {
       ...activeProfile,
       ...patch,
     };
+    if (patch.ftpWatts && patch.ftpWatts >= 60 && patch.ftpWatts <= 600) {
+      next.powerZones = buildPowerZonesFromFtp(patch.ftpWatts);
+    }
     if (patch.maxHrBpm && patch.maxHrBpm >= 120 && patch.maxHrBpm <= 230) {
       next.hrZones = buildHrZonesFromMax(patch.maxHrBpm);
     }
@@ -295,76 +315,185 @@ export const AthleteProfilesView: React.FC<AthleteProfilesViewProps> = ({
               W/kg
             </span>
           </div>
+
+          {/* 1-CLICK FTP ESTIMATOR FROM COMPLETED RIDES / TESTS */}
+          <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                Estymator FTP z Historii Jazd
+              </span>
+              {suggestedFtp && (
+                <span className="font-mono-tabular text-xs font-bold text-white">
+                  Sugerowane: <strong className="text-emerald-400">{suggestedFtp.suggestedFtpWatts} W</strong>
+                </span>
+              )}
+            </div>
+
+            {suggestedFtp ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {suggestedFtp.protocolLabel} · z jazdy{' '}
+                  <strong className="text-white">{suggestedFtp.workoutName}</strong> (
+                  {suggestedFtp.dateIso.slice(0, 10)})
+                </p>
+                {suggestedFtp.suggestedFtpWatts !== activeProfile.ftpWatts && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleFieldChange({ ftpWatts: suggestedFtp.suggestedFtpWatts });
+                      onNotifyToast?.(
+                        `Zaktualizowano FTP na ${suggestedFtp.suggestedFtpWatts} W i przeliczono 7 stref mocy!`
+                      );
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    Ustaw FTP na {suggestedFtp.suggestedFtpWatts} W
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                Ukończ trening testowy (np. <strong>MAP Ramp Test</strong> lub{' '}
+                <strong>Coggan 20m FTP Test</strong> z kategorii Testy), aby
+                automatycznie wyliczyć tutaj sugerowane FTP.
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Zones Preview (Power Z1-Z7 & HR Z1-Z5) */}
-        <div className="lg:col-span-7 rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* Power Zones */}
-          <div className="space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200 uppercase tracking-wider">
-              <Zap className="w-4 h-4 text-emerald-400" />
-              Strefy Mocy (FTP {activeProfile.ftpWatts} W)
+        {/* Zones Preview Strip + Collapsible Detailed Tables (Power Z1-Z7 & HR Z1-Z5) */}
+        <div className="lg:col-span-7 rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-white">
+                Automatyczne Strefy Mocy (Z1–Z7) i Tętna (Z1–Z5)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Przeliczane w czasie rzeczywistym dla FTP {activeProfile.ftpWatts} W oraz Max HR {activeProfile.maxHrBpm} BPM
+              </p>
             </div>
-            <div className="space-y-1.5">
-              {activeProfile.powerZones.map((pz) => {
-                const minW = Math.round(
-                  (pz.minPct / 100) * activeProfile.ftpWatts
-                );
-                const maxW =
-                  pz.maxPct >= 250
-                    ? 'MAX'
-                    : `${Math.round((pz.maxPct / 100) * activeProfile.ftpWatts)}W`;
-                return (
-                  <div
-                    key={pz.zone}
-                    className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#0B0F17] border border-slate-800/80 text-xs"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: pz.color }}
-                      />
-                      <span className="font-medium text-slate-200 truncate">
-                        {pz.name}
-                      </span>
-                    </div>
-                    <span className="font-mono-tabular font-semibold text-slate-300 shrink-0 ml-2">
-                      {minW}–{maxW}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDetailedZoneTables((v) => !v)}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#0B0F17] hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-emerald-300 flex items-center gap-1.5 transition-colors"
+            >
+              {showDetailedZoneTables ? (
+                <>
+                  <ChevronDown className="w-4 h-4" />
+                  <span>Ukryj pełne tabele stref</span>
+                </>
+              ) : (
+                <>
+                  <ChevronRight className="w-4 h-4" />
+                  <span>Pokaż pełne tabele stref (Z1–Z7 / HR)</span>
+                </>
+              )}
+            </button>
           </div>
 
-          {/* Heart Rate Zones */}
-          <div className="space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200 uppercase tracking-wider">
-              <Heart className="w-4 h-4 text-rose-400" />
-              Strefy Tętna (Max {activeProfile.maxHrBpm} BPM)
-            </div>
-            <div className="space-y-1.5">
-              {activeProfile.hrZones.map((hz) => (
+          {/* Always-visible Compact Visual Strip of Power Zones */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {activeProfile.powerZones.map((pz) => {
+              const minW = Math.round((pz.minPct / 100) * activeProfile.ftpWatts);
+              const maxW =
+                pz.maxPct >= 250
+                  ? 'MAX'
+                  : `${Math.round((pz.maxPct / 100) * activeProfile.ftpWatts)}W`;
+              return (
                 <div
-                  key={hz.zone}
-                  className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0B0F17] border border-slate-800/80 text-xs"
+                  key={pz.zone}
+                  className="rounded-xl bg-[#0B0F17] border border-slate-800 p-2.5 flex flex-col justify-between gap-1"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5">
                     <span
                       className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: hz.color }}
+                      style={{ backgroundColor: pz.color }}
                     />
-                    <span className="font-medium text-slate-200 truncate">
-                      {hz.name}
+                    <span className="text-[11px] font-bold text-white truncate">
+                      Z{pz.zone}
                     </span>
                   </div>
-                  <span className="font-mono-tabular font-semibold text-slate-300 shrink-0 ml-2">
-                    {hz.minBpm}–{hz.maxBpm} bpm
-                  </span>
+                  <div className="font-mono-tabular text-xs font-bold text-slate-200">
+                    {minW}–{maxW}
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
+
+          {/* Collapsible Full Tables for Power Zones and Heart Rate Zones */}
+          {showDetailedZoneTables && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2 border-t border-slate-800">
+              {/* Power Zones */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  <Zap className="w-4 h-4 text-emerald-400" />
+                  Strefy Mocy (FTP {activeProfile.ftpWatts} W)
+                </div>
+                <div className="space-y-1.5">
+                  {activeProfile.powerZones.map((pz) => {
+                    const minW = Math.round(
+                      (pz.minPct / 100) * activeProfile.ftpWatts
+                    );
+                    const maxW =
+                      pz.maxPct >= 250
+                        ? 'MAX'
+                        : `${Math.round((pz.maxPct / 100) * activeProfile.ftpWatts)}W`;
+                    return (
+                      <div
+                        key={pz.zone}
+                        className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#0B0F17] border border-slate-800/80 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: pz.color }}
+                          />
+                          <span className="font-medium text-slate-200 truncate">
+                            {pz.name}
+                          </span>
+                        </div>
+                        <span className="font-mono-tabular font-semibold text-slate-300 shrink-0 ml-2">
+                          {minW}–{maxW}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Heart Rate Zones */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  <Heart className="w-4 h-4 text-rose-400" />
+                  Strefy Tętna (Max {activeProfile.maxHrBpm} BPM)
+                </div>
+                <div className="space-y-1.5">
+                  {activeProfile.hrZones.map((hz) => (
+                    <div
+                      key={hz.zone}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0B0F17] border border-slate-800/80 text-xs"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: hz.color }}
+                        />
+                        <span className="font-medium text-slate-200 truncate">
+                          {hz.name}
+                        </span>
+                      </div>
+                      <span className="font-mono-tabular font-semibold text-slate-300 shrink-0 ml-2">
+                        {hz.minBpm}–{hz.maxBpm} bpm
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

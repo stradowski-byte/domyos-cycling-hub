@@ -16,6 +16,7 @@ import {
   Activity,
   Cloud,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -30,11 +31,14 @@ import {
   WellnessDayMetric,
 } from './types/cycling';
 import {
+  buildPowerZonesFromFtp,
   calculateActivitySummary,
   calculateBlockInstantTarget,
   calculateLocalWellnessSeries,
   createFallbackRuntimeProfile,
+  detectEstimatedFtpFromCompletedActivity,
   getInitialWorkouts,
+  mergeAndNormalizeWorkoutsLibrary,
 } from './services/rampAndPhysiologyEngine';
 import { ftmsController } from './services/ftmsBluetooth';
 import { audioAndWakeLock } from './services/audioAndWakeLock';
@@ -54,10 +58,14 @@ import {
   deletePlannedWorkoutFromFirestore,
   deleteWorkoutTxtFromLocalOpfs,
   ensureActivityHasRecords,
+  ensureFirestoreCollectionsInitialized,
   fetchAllStateFromFirestore,
   filterGoogleAuthenticatedProfiles,
+  flushOfflineSyncQueueWithBatch,
   getConfiguredRootFolderName,
   getKnownGoogleRiders,
+  getPendingSyncQueueCount,
+  getSavedWorkoutTags,
   initializeOfflineFolderStructure,
   offloadActivitiesTelemetryToOpfs,
   resolveOrCreateProfileForGoogleUser,
@@ -65,6 +73,8 @@ import {
   saveCompletedRideAndStateToLocalOpfs,
   savePlannedWorkoutToFirestore,
   saveProfileToFirestore,
+  saveWorkoutTagsLocally,
+  saveWorkoutTagsToFirestore,
   saveWorkoutTxtToLocalOpfs,
   subscribeToFirestoreHub,
   syncAllStateToFirestore,
@@ -155,19 +165,28 @@ export default function App() {
     Object.values(profiles)[0] ||
     createFallbackRuntimeProfile();
 
-  // Workouts Library State
+  // Workouts Library State (automatically merges all 18 scientific workouts and normalizes category tags)
   const [workouts, setWorkouts] = useState<StructuredWorkout[]>(() => {
     try {
       const saved = localStorage.getItem(LS_WORKOUTS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return mergeAndNormalizeWorkoutsLibrary(parsed);
+        }
       }
     } catch {
       // fallback
     }
     return getInitialWorkouts();
   });
+
+  // Available Workout Category Tags State (6 default categories + user custom tags)
+  const [workoutTags, setWorkoutTags] = useState<string[]>(() =>
+    getSavedWorkoutTags()
+  );
+  const [collectionsInitialized, setCollectionsInitialized] =
+    useState<boolean>(false);
 
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>(() => {
     return workouts[0]?.id || 'w_ramp_sweetspot';
@@ -203,6 +222,7 @@ export default function App() {
   const [use3sPowerSmoothing, setUse3sPowerSmoothing] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [isFocusHudMode, setIsFocusHudMode] = useState(false);
 
   // Completed Ride Modal
   const [justFinishedActivity, setJustFinishedActivity] =
@@ -278,7 +298,7 @@ export default function App() {
         });
         const merged = await syncWorkoutsWithLocalOpfs(workouts);
         if (merged && merged.length > 0) {
-          setWorkouts(merged);
+          setWorkouts(mergeAndNormalizeWorkoutsLibrary(merged));
         }
         const lightweight = await offloadActivitiesTelemetryToOpfs(
           activities,
@@ -340,6 +360,10 @@ export default function App() {
   // Subscribe to Google OAuth & Real-Time Firebase Firestore Hub
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
+  const workoutsRef = useRef(workouts);
+  workoutsRef.current = workouts;
+  const workoutTagsRef = useRef(workoutTags);
+  workoutTagsRef.current = workoutTags;
 
   useEffect(() => {
     let unsubFirestore: (() => void) | null = null;
@@ -360,6 +384,25 @@ export default function App() {
         saveProfileToFirestore(resolvedProf).catch(() => {});
         setKnownRiders(getKnownGoogleRiders());
 
+        // Non-destructively verify and initialize required Firestore collections & seed 18 workouts + tags if missing
+        ensureFirestoreCollectionsInitialized({
+          profile: resolvedProf,
+          workouts: workoutsRef.current,
+          tags: workoutTagsRef.current,
+        })
+          .then((res) => {
+            if (res.initializedCollections.length > 0) {
+              setCollectionsInitialized(true);
+            }
+            if (res.mergedTags && res.mergedTags.length > 0) {
+              setWorkoutTags(res.mergedTags);
+            }
+            if (res.mergedWorkouts && res.mergedWorkouts.length > 0) {
+              setWorkouts(res.mergedWorkouts);
+            }
+          })
+          .catch(() => {});
+
         // Start real-time Firestore listeners for active Google account
         unsubFirestore = subscribeToFirestoreHub({
           onProfilesSnapshot: (cloudProfiles) => {
@@ -376,7 +419,7 @@ export default function App() {
               const map = new Map<string, StructuredWorkout>();
               for (const w of prev) map.set(w.id, w);
               for (const cw of cloudWorkouts) map.set(cw.id, cw);
-              return Array.from(map.values());
+              return mergeAndNormalizeWorkoutsLibrary(Array.from(map.values()));
             });
           },
           onActivitiesSnapshot: (cloudActivities) => {
@@ -403,6 +446,9 @@ export default function App() {
           },
           onKnownRidersSnapshot: (riders) => {
             setKnownRiders(riders);
+          },
+          onTagsSnapshot: (cloudTags) => {
+            setWorkoutTags(cloudTags);
           },
         });
       }
@@ -900,7 +946,7 @@ export default function App() {
         setProfiles((prev) => ({ ...prev, ...restored.profiles }));
       }
       if (restored.workouts.length > 0) {
-        setWorkouts(restored.workouts);
+        setWorkouts(mergeAndNormalizeWorkoutsLibrary(restored.workouts));
       }
       if (restored.activities.length > 0) {
         setActivities(restored.activities);
@@ -910,6 +956,40 @@ export default function App() {
       );
     } catch (err: any) {
       showToast(err?.message || 'Nie udało się pobrać danych z Firebase.');
+    } finally {
+      setIsSyncingFirebase(false);
+    }
+  };
+
+  const handleUpdateWorkoutTags = (nextTags: string[]) => {
+    const normalized = saveWorkoutTagsLocally(nextTags);
+    setWorkoutTags(normalized);
+    if (googleUser) {
+      saveWorkoutTagsToFirestore(normalized).catch(() => {});
+    }
+  };
+
+  const handleEnsureFirestoreCollections = async () => {
+    if (!googleUser) {
+      await handleAddNewGoogleRider();
+    }
+    setIsSyncingFirebase(true);
+    try {
+      const res = await ensureFirestoreCollectionsInitialized({
+        profile: activeProfile,
+        workouts,
+        tags: workoutTags,
+      });
+      setCollectionsInitialized(true);
+      setWorkoutTags(res.mergedTags);
+      setWorkouts(res.mergedWorkouts);
+      showToast(
+        `Zweryfikowano kolekcje Firestore (hubConfig, profiles, plannedWorkouts, completedWorkouts) — zsynchronizowano ${res.mergedWorkouts.length} treningów i ${res.mergedTags.length} kategorii!`
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message || 'Nie udało się zweryfikować kolekcji w Firestore.'
+      );
     } finally {
       setIsSyncingFirebase(false);
     }
@@ -979,12 +1059,16 @@ export default function App() {
   );
 
   const handleFlushPendingSync = async () => {
-    if (pendingFirebaseActivities.length === 0) return;
+    const queuedMutationsCount = getPendingSyncQueueCount();
+    if (pendingFirebaseActivities.length === 0 && queuedMutationsCount === 0) {
+      return;
+    }
     if (!googleUser) {
       await handleAddNewGoogleRider();
     }
     setIsSyncingFirebase(true);
     try {
+      const flushedBatchCount = await flushOfflineSyncQueueWithBatch();
       let uploadedCount = 0;
       const syncedIds = new Set<string>();
       for (const pendingAct of pendingFirebaseActivities) {
@@ -1007,7 +1091,7 @@ export default function App() {
         )
       );
       showToast(
-        `Zsynchronizowano ${uploadedCount} zaległych treningów .FIT z pamięci OPFS do Firebase Firestore!`
+        `Zsynchronizowano paczkowo (writeBatch) ${uploadedCount} zaległych treningów .FIT oraz ${flushedBatchCount} zmian z kolejki Offline-First do Firebase Firestore!`
       );
     } catch (err: any) {
       showToast(
@@ -1026,6 +1110,16 @@ export default function App() {
     const runAutoBackgroundSync = async () => {
       autoSyncInFlightRef.current = true;
       try {
+        // 0. Flush any queued Offline-First mutations (profiles, tags, workouts, activities) in an atomic writeBatch
+        if (googleUser) {
+          const flushedBatchOps = await flushOfflineSyncQueueWithBatch();
+          if (flushedBatchOps > 0) {
+            showToast(
+              `Auto-Sync (writeBatch): Zsynchronizowano ${flushedBatchOps} operacji z kolejki Offline-First z Firebase!`
+            );
+          }
+        }
+
         // 1. Auto-upload any unsynced activities to Intervals.icu if profile has API key
         const unsyncedIntervals = activities.filter((a) => {
           const prof = profiles[a.profileId];
@@ -1213,6 +1307,35 @@ export default function App() {
       ? intervalsWellness
       : calculateLocalWellnessSeries(activities, activeProfile.id, 28);
 
+  const latestTsb =
+    computedWellnessSeries.length > 0
+      ? computedWellnessSeries[computedWellnessSeries.length - 1].tsb
+      : 2;
+
+  const lastProfileActivity =
+    activities.find((a) => a.profileId === activeProfile.id) || null;
+
+  const detectedPostRideFtp = detectEstimatedFtpFromCompletedActivity(
+    justFinishedActivity,
+    activeProfile,
+    currentWorkout
+  );
+
+  const handleApplyDetectedFtp = (newFtpWatts: number) => {
+    const clampedFtp = Math.max(60, Math.min(600, Math.round(newFtpWatts)));
+    const updatedProfile: AthleteProfile = {
+      ...activeProfile,
+      ftpWatts: clampedFtp,
+      powerZones: buildPowerZonesFromFtp(clampedFtp),
+      updatedAtIso: new Date().toISOString(),
+    };
+    setProfiles((prev) => ({ ...prev, [updatedProfile.id]: updatedProfile }));
+    saveProfileToFirestore(updatedProfile).catch(() => {});
+    showToast(
+      `Zaktualizowano FTP na ${clampedFtp} W i automatycznie przeliczono 7 stref mocy oraz zapisano w Firebase!`
+    );
+  };
+
   const isPwaUnlocked =
     isInstalled || (isAIStudioPreviewEnvironment() && isAiStudioBypassActive);
 
@@ -1255,7 +1378,8 @@ export default function App() {
         themeMode === 'soft-light' ? 'theme-soft-light' : 'theme-soft-dark'
       }`}
     >
-      {/* STRICT 3-ZONE TOP BAR CONTRACT */}
+      {/* STRICT 3-ZONE TOP BAR CONTRACT (HIDDEN IN ZEN FOCUS HUD MODE) */}
+      {!(activeTab === 'cockpit' && isFocusHudMode) && (
       <header className="sticky top-0 z-30 flex items-center justify-between gap-2 sm:gap-4 px-2.5 sm:px-8 py-2 bg-[#0B0F17]/95 backdrop-blur-md border-b border-slate-800 shrink-0 min-w-0">
         {/* Zone 1: Single text element wordmark */}
         <a
@@ -1422,6 +1546,7 @@ export default function App() {
           </button>
         </div>
       </header>
+      )}
 
       {/* TOP STATUS BANNERS */}
       {activeTab !== 'cockpit' && (
@@ -1676,7 +1801,16 @@ export default function App() {
               const res = await ftmsController.connectExternalPowerMeter();
               showToast(res.message);
             }}
-            onBackToWorkouts={() => setActiveTab('workouts')}
+            onBackToWorkouts={() => {
+              setIsFocusHudMode(false);
+              setActiveTab('workouts');
+            }}
+            onExtendCurrentBlockSec={(deltaSec) => {
+              setElapsedInBlockSec((prev) => Math.max(0, prev - deltaSec));
+              showToast(`Wydłużono aktualny odcinek o +${deltaSec} sekund.`);
+            }}
+            isFocusHudMode={isFocusHudMode}
+            onToggleFocusHudMode={() => setIsFocusHudMode((v) => !v)}
           />
         )}
 
@@ -1685,7 +1819,10 @@ export default function App() {
             activeProfile={activeProfile}
             profiles={profiles}
             workouts={workouts}
+            availableTags={workoutTags}
             selectedWorkoutId={currentWorkout.id}
+            latestTsb={latestTsb}
+            lastCompletedActivity={lastProfileActivity}
             isSyncingIntervals={isSyncingIntervals}
             isSyncingDriveTxt={isSyncingFirebase}
             onSelectAndLoadWorkout={(w, startNow) => {
@@ -1765,6 +1902,7 @@ export default function App() {
         {activeTab === 'profiles' && (
           <AthleteProfilesView
             activeProfile={activeProfile}
+            activities={activities}
             onUpdateProfile={(id, updated) => {
               setProfiles({ [id]: updated });
               saveProfileToFirestore(updated).catch(() => {});
@@ -1773,6 +1911,7 @@ export default function App() {
             onSyncFromIntervalsIcu={handleSyncFromIntervalsIcu}
             onOpenFastUserSwitcher={() => setIsFastSwitcherOpen(true)}
             onRefreshGoogleFitToken={handleRefreshGoogleFitToken}
+            onNotifyToast={showToast}
           />
         )}
 
@@ -1798,7 +1937,8 @@ export default function App() {
             onRestoreFromFirebase={handleRestoreFromFirebase}
             onImportBackupJson={(data) => {
               if (data.profiles) setProfiles(data.profiles);
-              if (data.workouts) setWorkouts(data.workouts);
+              if (data.workouts)
+                setWorkouts(mergeAndNormalizeWorkoutsLibrary(data.workouts));
               if (data.activities) setActivities(data.activities);
             }}
             onSaveEditedOpfsWorkout={(editedW) => {
@@ -1811,6 +1951,10 @@ export default function App() {
               savePlannedWorkoutToFirestore(editedW).catch(() => {});
             }}
             onNotifyToast={showToast}
+            workoutTags={workoutTags}
+            onUpdateWorkoutTags={handleUpdateWorkoutTags}
+            onEnsureFirestoreCollections={handleEnsureFirestoreCollections}
+            collectionsInitialized={collectionsInitialized}
           />
         )}
       </main>
@@ -1861,6 +2005,47 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* AUTOMATIC FTP DETECTOR & 1-CLICK PROFILE UPDATE AFTER TEST WORKOUT */}
+            {detectedPostRideFtp && (
+              <div className="rounded-2xl bg-emerald-500/15 border border-emerald-500/50 p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{detectedPostRideFtp.protocolName}</span>
+                  </div>
+                  <span className="font-mono-tabular text-xs font-bold text-white">
+                    Wyliczone FTP:{' '}
+                    <strong className="text-emerald-400 text-sm">
+                      {detectedPostRideFtp.estimatedFtpWatts} W
+                    </strong>{' '}
+                    ({detectedPostRideFtp.deltaWatts >= 0 ? `+${detectedPostRideFtp.deltaWatts}` : detectedPostRideFtp.deltaWatts}W)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 font-mono-tabular">
+                  {detectedPostRideFtp.sourceDetail} · Dotychczasowe FTP profilu: {activeProfile.ftpWatts} W
+                </p>
+                {detectedPostRideFtp.estimatedFtpWatts !== activeProfile.ftpWatts ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleApplyDetectedFtp(detectedPostRideFtp.estimatedFtpWatts)
+                    }
+                    className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"
+                  >
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      Zaktualizuj moje FTP na {detectedPostRideFtp.estimatedFtpWatts} W jednym kliknięciem
+                    </span>
+                  </button>
+                ) : (
+                  <div className="text-[11px] font-bold text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Profil ma już ustawione FTP = {activeProfile.ftpWatts} W (7 stref mocy przeliczonych)</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2.5 pt-1">
               <button
@@ -1914,7 +2099,8 @@ export default function App() {
         </div>
       )}
 
-      {/* FIXED BOTTOM NAVIGATION BAR FOR MOBILE THUMB ERGONOMICS */}
+      {/* FIXED BOTTOM NAVIGATION BAR FOR MOBILE THUMB ERGONOMICS (HIDDEN IN ZEN FOCUS HUD MODE) */}
+      {!(activeTab === 'cockpit' && isFocusHudMode) && (
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0B0F17]/95 backdrop-blur-md border-t border-slate-800 grid grid-cols-5 items-center h-14 px-1">
         <button
           onClick={() => setActiveTab('workouts')}
@@ -1976,6 +2162,7 @@ export default function App() {
           </span>
         </button>
       </nav>
+      )}
     </div>
   );
 }

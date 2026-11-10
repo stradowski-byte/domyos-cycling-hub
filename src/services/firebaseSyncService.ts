@@ -5,6 +5,8 @@ import {
   deleteDoc,
   onSnapshot,
   getDocs,
+  getDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import {
@@ -31,16 +33,256 @@ import {
   computeRidePeakPowerAndHr,
   createFallbackRuntimeProfile,
   createNewAthleteProfile,
+  DEFAULT_WORKOUT_TAGS,
   getCleanWorkoutTxtFileName,
+  inferWorkoutTags,
+  mergeAndNormalizeWorkoutsLibrary,
   parseIcuTextFileToWorkout,
   PROFILE_AVATAR_COLORS,
-  sanitizeProfileSlug,
   serializeWorkoutToIcuTextFile,
 } from './rampAndPhysiologyEngine';
 
-export const CURRENT_APP_VERSION = '2.2.0';
+export const CURRENT_APP_VERSION = '2.4.0';
 const LS_OFFLINE_FS_MANIFEST_KEY = 'domyos_offline_fs_manifest_v1';
 const LS_PROFILES_KEY = 'domyos_hub_profiles_v1';
+export const LS_WORKOUT_TAGS_KEY = 'domyos_hub_workout_tags_v1';
+export const LS_PENDING_SYNC_QUEUE_KEY = 'domyos_hub_pending_sync_queue_v1';
+
+/** Firebase Spark (Free Tier) Cloud Firestore total stored data limit: 1 GiB = 1024 MB */
+export const FIREBASE_SPARK_LIMIT_MB = 1024;
+export const FIREBASE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
+
+export interface FirestoreSparkStorageSummary {
+  usedBytes: number;
+  usedMb: number;
+  limitMb: number;
+  remainingMb: number;
+  usedPercent: number;
+  collectionsInitialized: boolean;
+}
+
+export interface QueuedFirestoreMutation {
+  key: string; // e.g. 'plannedWorkouts/w_123'
+  collectionName: 'hubConfig' | 'profiles' | 'plannedWorkouts' | 'completedWorkouts';
+  docId: string;
+  op: 'set' | 'delete';
+  payload?: Record<string, unknown>;
+  queuedAtIso: string;
+}
+
+export function getOfflineSyncQueue(): QueuedFirestoreMutation[] {
+  try {
+    const raw = localStorage.getItem(LS_PENDING_SYNC_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineSyncQueue(queue: QueuedFirestoreMutation[]): void {
+  try {
+    localStorage.setItem(LS_PENDING_SYNC_QUEUE_KEY, JSON.stringify(queue.slice(-250)));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function getPendingSyncQueueCount(): number {
+  return getOfflineSyncQueue().length;
+}
+
+export function enqueueOfflineFirestoreMutation(
+  mutation: Omit<QueuedFirestoreMutation, 'key' | 'queuedAtIso'>
+): void {
+  const key = `${mutation.collectionName}/${mutation.docId}`;
+  const current = getOfflineSyncQueue().filter((item) => item.key !== key);
+  current.push({
+    ...mutation,
+    key,
+    queuedAtIso: new Date().toISOString(),
+  });
+  saveOfflineSyncQueue(current);
+}
+
+/**
+ * Flushes all queued Offline-First mutations to Firebase Firestore using atomic `writeBatch`
+ * chunks (max 400 operations per batch) to minimize network round-trips and Spark quota usage.
+ */
+export async function flushOfflineSyncQueueWithBatch(): Promise<number> {
+  if (!db || !auth?.currentUser) return 0;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+
+  const queue = getOfflineSyncQueue();
+  if (queue.length === 0) return 0;
+
+  let flushedCount = 0;
+  const chunkSize = 400;
+
+  try {
+    for (let i = 0; i < queue.length; i += chunkSize) {
+      const chunk = queue.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const ref = doc(db, item.collectionName, item.docId);
+        if (item.op === 'delete') {
+          batch.delete(ref);
+        } else if (item.payload) {
+          batch.set(ref, item.payload, { merge: true });
+        }
+      }
+      await batch.commit();
+      flushedCount += chunk.length;
+    }
+    saveOfflineSyncQueue([]);
+    return flushedCount;
+  } catch (err) {
+    console.warn('Batch flush of offline sync queue deferred:', err);
+    return flushedCount;
+  }
+}
+
+export function normalizeTagList(customTags?: string[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  for (const defTag of DEFAULT_WORKOUT_TAGS) {
+    const clean = defTag.trim();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      ordered.push(clean);
+    }
+  }
+
+  for (const raw of customTags || []) {
+    if (typeof raw !== 'string') continue;
+    const clean = raw.trim();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      ordered.push(clean);
+    }
+  }
+
+  return ordered;
+}
+
+export function getSavedWorkoutTags(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_WORKOUT_TAGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return normalizeTagList(parsed);
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return [...DEFAULT_WORKOUT_TAGS];
+}
+
+export function saveWorkoutTagsLocally(tags: string[]): string[] {
+  const normalized = normalizeTagList(tags);
+  try {
+    localStorage.setItem(LS_WORKOUT_TAGS_KEY, JSON.stringify(normalized));
+  } catch {
+    // ignore
+  }
+  return normalized;
+}
+
+export async function saveWorkoutTagsToFirestore(tags: string[]): Promise<string[]> {
+  const normalized = saveWorkoutTagsLocally(tags);
+  const payload = {
+    updatedAtIso: new Date().toISOString(),
+    workoutTags: normalized,
+  };
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'hubConfig',
+      docId: 'default',
+      op: 'set',
+      payload,
+    });
+    return normalized;
+  }
+
+  if (!db || !auth?.currentUser) return normalized;
+  const path = 'hubConfig/default';
+  try {
+    await setDoc(doc(db, 'hubConfig', 'default'), payload, { merge: true });
+  } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'hubConfig',
+      docId: 'default',
+      op: 'set',
+      payload,
+    });
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+  return normalized;
+}
+
+/**
+ * Estimates the current Firebase Cloud Firestore storage usage against the 1024 MB (1 GiB)
+ * Firebase Spark Free Plan limit.
+ */
+export function estimateFirestoreSparkStorage(params: {
+  profiles: Record<ProfileId, AthleteProfile>;
+  workouts: StructuredWorkout[];
+  activities: CompletedActivity[];
+  tags: string[];
+  collectionsInitialized?: boolean;
+}): FirestoreSparkStorageSummary {
+  const encoder =
+    typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+  const byteSizeOf = (obj: unknown): number => {
+    try {
+      const str = JSON.stringify(obj) || '';
+      return encoder ? encoder.encode(str).length : str.length * 2;
+    } catch {
+      return 0;
+    }
+  };
+
+  // Firestore document & index overhead multiplier (~1.35x raw JSON + Base64 .FIT payload)
+  const profilesBytes = byteSizeOf(params.profiles) * 1.35;
+  const workoutsBytes = byteSizeOf(params.workouts) * 1.35;
+  const hubConfigBytes = byteSizeOf({ workoutTags: params.tags }) * 1.35 + 2048;
+
+  let activitiesBytes = 0;
+  for (const act of params.activities || []) {
+    const baseBytes = byteSizeOf(act);
+    // If fitBase64 is not hydrated in memory yet, estimate ~35 KB per hour of 1Hz FIT + downsampled telemetry
+    const estimatedFitAndTelemetryOverlay = act.fitBase64
+      ? 0
+      : Math.max(8192, Math.round((act.durationSec || 1800) * 18));
+    activitiesBytes += (baseBytes + estimatedFitAndTelemetryOverlay) * 1.35;
+  }
+
+  const usedBytes = Math.round(
+    profilesBytes + workoutsBytes + activitiesBytes + hubConfigBytes
+  );
+  const usedMb = Number((usedBytes / (1024 * 1024)).toFixed(2));
+  const remainingMb = Number(
+    Math.max(0, FIREBASE_SPARK_LIMIT_MB - usedMb).toFixed(2)
+  );
+  const usedPercent = Math.min(
+    100,
+    Number(((usedMb / FIREBASE_SPARK_LIMIT_MB) * 100).toFixed(3))
+  );
+
+  return {
+    usedBytes,
+    usedMb,
+    limitMb: FIREBASE_SPARK_LIMIT_MB,
+    remainingMb,
+    usedPercent,
+    collectionsInitialized: Boolean(params.collectionsInitialized),
+  };
+}
 
 export interface OfflineDirectoryManifest {
   initialized: boolean;
@@ -193,24 +435,175 @@ export function resolveOrCreateProfileForGoogleUser(
 }
 
 // ============================================================================
-// 2. FIREBASE CLOUD FIRESTORE REAL-TIME SYNC & CRUD
+// 2. FIREBASE CLOUD FIRESTORE REAL-TIME SYNC, NON-DESTRUCTIVE BOOTSTRAP & CRUD
 // ============================================================================
 
 function sanitizeForFirestore<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
+/**
+ * Checks whether all required Firestore collections (`hubConfig`, `profiles`,
+ * `plannedWorkouts`, `completedWorkouts`) exist after login and initializes any missing
+ * documents/collections in a single atomic `writeBatch` without EVER deleting or overwriting
+ * existing user data.
+ */
+export async function ensureFirestoreCollectionsInitialized(params: {
+  profile: AthleteProfile;
+  workouts: StructuredWorkout[];
+  tags: string[];
+}): Promise<{
+  initializedCollections: string[];
+  mergedTags: string[];
+  mergedWorkouts: StructuredWorkout[];
+}> {
+  if (!db || !auth?.currentUser) {
+    return {
+      initializedCollections: [],
+      mergedTags: normalizeTagList(params.tags),
+      mergedWorkouts: mergeAndNormalizeWorkoutsLibrary(params.workouts),
+    };
+  }
+
+  const initializedCollections: string[] = [];
+
+  try {
+    // First flush any queued offline mutations
+    await flushOfflineSyncQueueWithBatch();
+
+    const hubDocRef = doc(db, 'hubConfig', 'default');
+    const profDocRef = doc(db, 'profiles', params.profile.id);
+
+    const [hubSnap, profSnap, workSnap] = await Promise.all([
+      getDoc(hubDocRef),
+      getDoc(profDocRef),
+      getDocs(collection(db, 'plannedWorkouts')),
+    ]);
+
+    const existingCloudTags =
+      hubSnap.exists() && Array.isArray(hubSnap.data()?.workoutTags)
+        ? (hubSnap.data()?.workoutTags as string[])
+        : [];
+    const mergedTags = normalizeTagList([...params.tags, ...existingCloudTags]);
+    saveWorkoutTagsLocally(mergedTags);
+
+    const existingCloudWorkoutsMap = new Map<string, StructuredWorkout>();
+    workSnap.forEach((d) => {
+      const data = d.data() as StructuredWorkout;
+      if (data && data.id && Array.isArray(data.blocks)) {
+        existingCloudWorkoutsMap.set(data.id, data);
+      }
+    });
+
+    const fullNormalizedLibrary = mergeAndNormalizeWorkoutsLibrary([
+      ...Array.from(existingCloudWorkoutsMap.values()),
+      ...params.workouts,
+    ]);
+
+    const batch = writeBatch(db);
+    let batchOpsCount = 0;
+
+    // 1. Initialize hubConfig/default if missing or missing workoutTags
+    if (!hubSnap.exists() || !Array.isArray(hubSnap.data()?.workoutTags)) {
+      batch.set(
+        hubDocRef,
+        sanitizeForFirestore({
+          updatedAtIso: new Date().toISOString(),
+          workoutTags: mergedTags,
+        }),
+        { merge: true }
+      );
+      batchOpsCount++;
+      initializedCollections.push('hubConfig');
+    }
+
+    // 2. Initialize profiles/{profile.id} if missing
+    if (!profSnap.exists()) {
+      batch.set(
+        profDocRef,
+        sanitizeForFirestore({
+          ...params.profile,
+          updatedAtIso: new Date().toISOString(),
+        }),
+        { merge: true }
+      );
+      batchOpsCount++;
+      initializedCollections.push('profiles');
+    }
+
+    // 3. Seed or tag any missing workouts in plannedWorkouts in the same atomic writeBatch
+    let addedOrTaggedWorkouts = 0;
+    for (const w of fullNormalizedLibrary) {
+      const cloudExisting = existingCloudWorkoutsMap.get(w.id);
+      if (
+        !cloudExisting ||
+        !Array.isArray(cloudExisting.tags) ||
+        cloudExisting.tags.length === 0
+      ) {
+        const normalizedTags = inferWorkoutTags(w);
+        batch.set(
+          doc(db, 'plannedWorkouts', w.id),
+          sanitizeForFirestore({
+            ...w,
+            tags: normalizedTags,
+            ownerUid: w.ownerUid || auth.currentUser.uid,
+            updatedAtIso: new Date().toISOString(),
+          }),
+          { merge: true }
+        );
+        batchOpsCount++;
+        addedOrTaggedWorkouts++;
+      }
+    }
+
+    if (workSnap.empty || addedOrTaggedWorkouts > 0) {
+      initializedCollections.push('plannedWorkouts');
+    }
+
+    if (batchOpsCount > 0) {
+      await batch.commit();
+    }
+
+    initializedCollections.push('completedWorkouts');
+
+    return {
+      initializedCollections,
+      mergedTags,
+      mergedWorkouts: fullNormalizedLibrary,
+    };
+  } catch (err) {
+    console.warn('Firestore collection bootstrap warning:', err);
+    return {
+      initializedCollections,
+      mergedTags: normalizeTagList(params.tags),
+      mergedWorkouts: mergeAndNormalizeWorkoutsLibrary(params.workouts),
+    };
+  }
+}
+
 export async function saveProfileToFirestore(profile: AthleteProfile): Promise<void> {
+  const payload = sanitizeForFirestore({
+    ...profile,
+    updatedAtIso: new Date().toISOString(),
+  }) as unknown as Record<string, unknown>;
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'profiles',
+      docId: profile.id,
+      op: 'set',
+      payload,
+    });
+    return;
+  }
+
   if (!db || !auth?.currentUser) return;
   const path = `profiles/${profile.id}`;
   try {
-    const payload = sanitizeForFirestore({
-      ...profile,
-      updatedAtIso: new Date().toISOString(),
-    });
-    await setDoc(doc(db, 'profiles', profile.id), payload, { merge: true });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'profiles', profile.id), payload, { merge: true });
 
-    // Also update known riders in hubConfig/default
+    // Also update known riders in hubConfig/default in the same atomic batch
     if (profile.uid || profile.email) {
       const riderEntry: KnownGoogleRider = {
         uid: profile.uid || auth.currentUser.uid,
@@ -225,7 +618,7 @@ export async function saveProfileToFirestore(profile: AthleteProfile): Promise<v
         intervalsEnabled: Boolean(profile.intervals?.enabled),
       };
       const updatedRiders = upsertKnownGoogleRider(riderEntry);
-      await setDoc(
+      batch.set(
         doc(db, 'hubConfig', 'default'),
         sanitizeForFirestore({
           updatedAtIso: new Date().toISOString(),
@@ -234,13 +627,29 @@ export async function saveProfileToFirestore(profile: AthleteProfile): Promise<v
         { merge: true }
       );
     }
+
+    await batch.commit();
   } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'profiles',
+      docId: profile.id,
+      op: 'set',
+      payload,
+    });
     handleFirestoreError(err, OperationType.WRITE, path);
     throw err;
   }
 }
 
 export async function deleteProfileFromFirestore(profileId: ProfileId): Promise<void> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'profiles',
+      docId: profileId,
+      op: 'delete',
+    });
+    return;
+  }
   if (!db || !auth?.currentUser) return;
   const path = `profiles/${profileId}`;
   try {
@@ -254,16 +663,35 @@ export async function deleteProfileFromFirestore(profileId: ProfileId): Promise<
 export async function savePlannedWorkoutToFirestore(
   workout: StructuredWorkout
 ): Promise<void> {
+  const normalizedTags = inferWorkoutTags(workout);
+  const payload = sanitizeForFirestore({
+    ...workout,
+    tags: normalizedTags,
+    ownerUid: workout.ownerUid || auth?.currentUser?.uid || 'offline_user',
+    updatedAtIso: new Date().toISOString(),
+  }) as unknown as Record<string, unknown>;
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'plannedWorkouts',
+      docId: workout.id,
+      op: 'set',
+      payload,
+    });
+    return;
+  }
+
   if (!db || !auth?.currentUser) return;
   const path = `plannedWorkouts/${workout.id}`;
   try {
-    const payload = sanitizeForFirestore({
-      ...workout,
-      ownerUid: workout.ownerUid || auth.currentUser.uid,
-      updatedAtIso: new Date().toISOString(),
-    });
     await setDoc(doc(db, 'plannedWorkouts', workout.id), payload, { merge: true });
   } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'plannedWorkouts',
+      docId: workout.id,
+      op: 'set',
+      payload,
+    });
     handleFirestoreError(err, OperationType.WRITE, path);
     throw err;
   }
@@ -272,6 +700,14 @@ export async function savePlannedWorkoutToFirestore(
 export async function deletePlannedWorkoutFromFirestore(
   workoutId: string
 ): Promise<void> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'plannedWorkouts',
+      docId: workoutId,
+      op: 'delete',
+    });
+    return;
+  }
   if (!db || !auth?.currentUser) return;
   const path = `plannedWorkouts/${workoutId}`;
   try {
@@ -299,33 +735,49 @@ function downsampleRecordsForFirestore(
 export async function saveCompletedActivityToFirestore(
   activity: CompletedActivity
 ): Promise<CompletedActivity> {
+  const hydrated = await ensureActivityHasRecords(activity);
+  const fitBase64 = activity.fitBase64 || encodeActivityToFitBase64(hydrated);
+  const compactRecords = downsampleRecordsForFirestore(hydrated.records, 360);
+
+  const firestoreDoc: CompletedActivity = sanitizeForFirestore({
+    ...hydrated,
+    ownerUid: hydrated.ownerUid || auth?.currentUser?.uid || 'offline_user',
+    ownerEmail: hydrated.ownerEmail || auth?.currentUser?.email || '',
+    records: compactRecords,
+    fitBase64,
+    syncedToFirebase: true,
+    pendingFirebaseSync: false,
+    syncedToGoogleDrive: true,
+    pendingDriveSync: false,
+  });
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activity.id,
+      op: 'set',
+      payload: firestoreDoc as unknown as Record<string, unknown>,
+    });
+    return firestoreDoc;
+  }
+
   if (!db || !auth?.currentUser) {
     throw new Error('Brak aktywnej sesji Google OAuth w Firebase.');
   }
   const path = `completedWorkouts/${activity.id}`;
   try {
-    const hydrated = await ensureActivityHasRecords(activity);
-    const fitBase64 = activity.fitBase64 || encodeActivityToFitBase64(hydrated);
-    const compactRecords = downsampleRecordsForFirestore(hydrated.records, 360);
-
-    const firestoreDoc: CompletedActivity = sanitizeForFirestore({
-      ...hydrated,
-      ownerUid: hydrated.ownerUid || auth.currentUser.uid,
-      ownerEmail: hydrated.ownerEmail || auth.currentUser.email || '',
-      records: compactRecords,
-      fitBase64,
-      syncedToFirebase: true,
-      pendingFirebaseSync: false,
-      syncedToGoogleDrive: true,
-      pendingDriveSync: false,
-    });
-
     await setDoc(doc(db, 'completedWorkouts', activity.id), firestoreDoc, {
       merge: true,
     });
 
     return firestoreDoc;
   } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activity.id,
+      op: 'set',
+      payload: firestoreDoc as unknown as Record<string, unknown>,
+    });
     handleFirestoreError(err, OperationType.WRITE, path);
     throw err;
   }
@@ -344,22 +796,69 @@ export async function syncAllStateToFirestore(params: {
     throw new Error('Zaloguj się kontem Google, aby zsynchronizować dane z Firebase.');
   }
 
+  await flushOfflineSyncQueueWithBatch();
+
+  // Commit profiles + plannedWorkouts in a single atomic writeBatch
+  const batch = writeBatch(db);
   let profilesCount = 0;
   for (const prof of Object.values(params.profiles)) {
-    await saveProfileToFirestore(prof);
+    batch.set(
+      doc(db, 'profiles', prof.id),
+      sanitizeForFirestore({
+        ...prof,
+        updatedAtIso: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
     profilesCount++;
   }
 
   let workoutsCount = 0;
   for (const w of params.workouts) {
-    await savePlannedWorkoutToFirestore(w);
+    const normalizedTags = inferWorkoutTags(w);
+    batch.set(
+      doc(db, 'plannedWorkouts', w.id),
+      sanitizeForFirestore({
+        ...w,
+        tags: normalizedTags,
+        ownerUid: w.ownerUid || auth.currentUser.uid,
+        updatedAtIso: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
     workoutsCount++;
   }
 
+  await batch.commit();
+
+  // Hydrate and batch completed activities in groups of 25 (since each contains a binary Base64 .FIT payload)
   let activitiesCount = 0;
-  for (const act of params.activities) {
-    await saveCompletedActivityToFirestore(act);
-    activitiesCount++;
+  const actList = params.activities || [];
+  const actBatchSize = 25;
+  for (let i = 0; i < actList.length; i += actBatchSize) {
+    const slice = actList.slice(i, i + actBatchSize);
+    const actBatch = writeBatch(db);
+    for (const act of slice) {
+      const hydrated = await ensureActivityHasRecords(act);
+      const fitBase64 = act.fitBase64 || encodeActivityToFitBase64(hydrated);
+      const compactRecords = downsampleRecordsForFirestore(hydrated.records, 360);
+      const firestoreDoc: CompletedActivity = sanitizeForFirestore({
+        ...hydrated,
+        ownerUid: hydrated.ownerUid || auth.currentUser.uid,
+        ownerEmail: hydrated.ownerEmail || auth.currentUser.email || '',
+        records: compactRecords,
+        fitBase64,
+        syncedToFirebase: true,
+        pendingFirebaseSync: false,
+        syncedToGoogleDrive: true,
+        pendingDriveSync: false,
+      });
+      actBatch.set(doc(db, 'completedWorkouts', act.id), firestoreDoc, {
+        merge: true,
+      });
+      activitiesCount++;
+    }
+    await actBatch.commit();
   }
 
   return { profilesCount, workoutsCount, activitiesCount };
@@ -400,7 +899,10 @@ export async function fetchAllStateFromFirestore(): Promise<{
   workSnap.forEach((d) => {
     const data = d.data() as StructuredWorkout;
     if (data && data.id && Array.isArray(data.blocks)) {
-      workouts.push(data);
+      workouts.push({
+        ...data,
+        tags: inferWorkoutTags(data),
+      });
     }
   });
 
@@ -417,18 +919,24 @@ export async function fetchAllStateFromFirestore(): Promise<{
       new Date(b.startedAtIso).getTime() - new Date(a.startedAtIso).getTime()
   );
 
-  return { profiles, workouts, activities };
+  return {
+    profiles,
+    workouts: mergeAndNormalizeWorkoutsLibrary(workouts),
+    activities,
+  };
 }
 
 /**
  * Subscribes to real-time `onSnapshot` updates from the central Firebase Firestore
- * database for the active Google user's profile, planned workouts, completed workouts, and known riders.
+ * database for the active Google user's profile, planned workouts, completed workouts,
+ * known riders, and custom workout category tags.
  */
 export function subscribeToFirestoreHub(callbacks: {
   onProfilesSnapshot: (profiles: Record<ProfileId, AthleteProfile>) => void;
   onWorkoutsSnapshot: (workouts: StructuredWorkout[]) => void;
   onActivitiesSnapshot: (activities: CompletedActivity[]) => void;
   onKnownRidersSnapshot?: (riders: KnownGoogleRider[]) => void;
+  onTagsSnapshot?: (tags: string[]) => void;
 }): () => void {
   if (!db || !auth?.currentUser) {
     return () => {};
@@ -445,6 +953,10 @@ export function subscribeToFirestoreHub(callbacks: {
         if (Array.isArray(data?.registeredRiders)) {
           saveKnownGoogleRiders(data.registeredRiders);
           callbacks.onKnownRidersSnapshot?.(data.registeredRiders);
+        }
+        if (Array.isArray(data?.workoutTags)) {
+          const normalized = saveWorkoutTagsLocally(data.workoutTags);
+          callbacks.onTagsSnapshot?.(normalized);
         }
       }
     },
@@ -482,7 +994,10 @@ export function subscribeToFirestoreHub(callbacks: {
       snap.forEach((d) => {
         const w = d.data() as StructuredWorkout;
         if (w && w.id && Array.isArray(w.blocks)) {
-          list.push(w);
+          list.push({
+            ...w,
+            tags: inferWorkoutTags(w),
+          });
         }
       });
       if (list.length > 0) {
