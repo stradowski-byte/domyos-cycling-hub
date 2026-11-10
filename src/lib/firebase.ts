@@ -197,6 +197,44 @@ export function clearCustomFirebaseConfig() {
   window.location.reload();
 }
 
+export const DEFAULT_GITHUB_PAGES_URL =
+  'https://stradowski-by.github.io/domyos-cycling-hub/';
+export const DEFAULT_GITHUB_REPO_URL =
+  'https://github.com/stradowski-by/domyos-cycling-hub';
+const CUSTOM_GH_PAGES_URL_KEY = 'domyos_hub_gh_pages_url_v1';
+
+export function getGitHubPagesInstallUrl(): string {
+  try {
+    const custom = localStorage.getItem(CUSTOM_GH_PAGES_URL_KEY);
+    if (custom && custom.trim().startsWith('http')) {
+      return custom.trim();
+    }
+    if (
+      typeof window !== 'undefined' &&
+      window.location.hostname.endsWith('.github.io')
+    ) {
+      return `${window.location.origin}${window.location.pathname}`;
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_GITHUB_PAGES_URL;
+}
+
+export function saveCustomGitHubPagesUrl(url: string): string {
+  const clean = url.trim() || DEFAULT_GITHUB_PAGES_URL;
+  try {
+    if (clean === DEFAULT_GITHUB_PAGES_URL) {
+      localStorage.removeItem(CUSTOM_GH_PAGES_URL_KEY);
+    } else {
+      localStorage.setItem(CUSTOM_GH_PAGES_URL_KEY, clean);
+    }
+  } catch {
+    // ignore
+  }
+  return clean;
+}
+
 const { config: activeConfig, isCustom: isUsingCustomConfig } =
   getActiveFirebaseConfig();
 

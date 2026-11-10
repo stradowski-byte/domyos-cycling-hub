@@ -17,6 +17,7 @@ import {
   Cloud,
   X,
   Sparkles,
+  ExternalLink,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -48,6 +49,7 @@ import {
 } from './services/fitEncoder';
 import {
   AI_STUDIO_PWA_BYPASS_KEY,
+  getGitHubPagesInstallUrl,
   isAIStudioPreviewEnvironment,
   isConfigured,
   signInRiderWithGoogle,
@@ -1694,13 +1696,55 @@ export default function App() {
               </div>
             )}
 
+            <div className="rounded-xl bg-[#0B0F17] border border-sky-500/40 p-3.5 space-y-2.5 text-xs">
+              <div className="font-bold text-white flex items-center justify-between gap-2">
+                <span>Bezpośredni link do Twojego GitHub Pages:</span>
+                <span className="text-[11px] font-mono-tabular text-emerald-400">
+                  PWA Ready
+                </span>
+              </div>
+              <a
+                href={getGitHubPagesInstallUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block font-mono-tabular text-xs font-bold text-sky-400 hover:underline break-all"
+              >
+                {getGitHubPagesInstallUrl()}
+              </a>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <a
+                  href={getGitHubPagesInstallUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[38px] px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  <span>Otwórz GitHub Pages w Nowej Karcie</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(getGitHubPagesInstallUrl());
+                      setToastMessage('Skopiowano link GitHub Pages do schowka!');
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  className="min-h-[38px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs transition-colors"
+                >
+                  Kopiuj Link
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
               <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5 space-y-1.5">
                 <div className="font-bold text-emerald-400">
                   1. Telefon Android (Chrome / Edge / Brave):
                 </div>
                 <p>
-                  Otwórz adres aplikacji z GitHub Pages w Chrome na telefonie → kliknij przycisk <strong>„Zainstaluj Apkę”</strong> na górnym pasku (lub menu przeglądarki <code className="font-mono-tabular">⋮</code> → <strong>„Zainstaluj aplikację”</strong>).
+                  Otwórz powyższy adres aplikacji z GitHub Pages w Chrome na telefonie → kliknij przycisk <strong>„Zainstaluj Apkę”</strong> na górnym pasku (lub menu przeglądarki <code className="font-mono-tabular">⋮</code> → <strong>„Zainstaluj aplikację”</strong>).
                 </p>
               </div>
 

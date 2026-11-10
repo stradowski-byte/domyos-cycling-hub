@@ -28,6 +28,7 @@ import {
   ChevronDown,
   ChevronRight,
   Wrench,
+  Copy,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -53,10 +54,14 @@ import {
 import {
   activeConfig,
   clearCustomFirebaseConfig,
+  DEFAULT_GITHUB_PAGES_URL,
+  DEFAULT_GITHUB_REPO_URL,
   FIREBASE_CONSOLE_PLACEHOLDER,
   formatFirebaseConfigText,
+  getGitHubPagesInstallUrl,
   isUsingCustomConfig,
   saveCustomFirebaseConfig,
+  saveCustomGitHubPagesUrl,
 } from '../lib/firebase';
 
 interface ProfilesAndCloudSettingsViewProps {
@@ -127,7 +132,28 @@ export const ProfilesAndCloudSettingsView: React.FC<
     formatFirebaseConfigText(activeConfig)
   );
   const [newTagInput, setNewTagInput] = useState('');
+  const [ghPagesUrl, setGhPagesUrl] = useState<string>(() =>
+    getGitHubPagesInstallUrl()
+  );
+  const [isEditingGhPagesUrl, setIsEditingGhPagesUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleCopyGhPagesUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(ghPagesUrl);
+      onNotifyToast?.('Skopiowano link do instalacji PWA (GitHub Pages)!');
+    } catch {
+      onNotifyToast?.(`Link do instalacji: ${ghPagesUrl}`);
+    }
+  };
+
+  const handleSaveGhPagesUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    const saved = saveCustomGitHubPagesUrl(ghPagesUrl);
+    setGhPagesUrl(saved);
+    setIsEditingGhPagesUrl(false);
+    onNotifyToast?.('Zapisano adres GitHub Pages do instalacji PWA.');
+  };
 
   const sparkStorage = estimateFirestoreSparkStorage({
     profiles,
@@ -641,6 +667,120 @@ export const ProfilesAndCloudSettingsView: React.FC<
             );
           })}
         </div>
+      </div>
+
+      {/* =====================================================================
+          1C. DIRECT GITHUB PAGES PWA INSTALLATION LINK CARD (ALWAYS VISIBLE)
+         ===================================================================== */}
+      <div className="rounded-2xl bg-[#131B26] border border-sky-500/40 p-4 sm:p-5 space-y-3.5 min-w-0 overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+          <div className="space-y-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-sky-400 shrink-0" />
+                <span>
+                  Link do Instalacji Aplikacji PWA (GitHub Pages)
+                </span>
+              </h2>
+              <span className="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-500/40 text-[11px] font-bold text-sky-300">
+                Android & iOS Standalone
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Otwórz poniższy adres bezpośrednio w przeglądarce Chrome (Android)
+              lub Safari (iOS) na telefonie bądź tablecie, aby zainstalować pełną
+              aplikację PWA na ekranie głównym.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <a
+              href={ghPagesUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[42px] px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+            >
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              <span>Otwórz GitHub Pages (Zainstaluj Apkę)</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={handleCopyGhPagesUrl}
+              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Kopiuj Link</span>
+            </button>
+
+            {isPwaInstallable && !isPwaInstalled && (
+              <button
+                type="button"
+                onClick={onInstallPwa}
+                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Smartphone className="w-4 h-4 shrink-0" />
+                <span>Zainstaluj Teraz</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Clickable URL Bar + Quick Edit Option */}
+        <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <GitBranch className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-slate-400 shrink-0">Adres Pages:</span>
+            <a
+              href={ghPagesUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono-tabular font-bold text-emerald-400 hover:underline truncate"
+            >
+              {ghPagesUrl}
+            </a>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href={`${DEFAULT_GITHUB_REPO_URL}/actions`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-semibold text-sky-400 hover:underline flex items-center gap-1"
+            >
+              <span>Status GitHub Actions</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              type="button"
+              onClick={() => setIsEditingGhPagesUrl((v) => !v)}
+              className="text-[11px] font-semibold text-slate-400 hover:text-white underline underline-offset-4"
+            >
+              {isEditingGhPagesUrl ? 'Anuluj' : 'Zmień URL'}
+            </button>
+          </div>
+        </div>
+
+        {isEditingGhPagesUrl && (
+          <form
+            onSubmit={handleSaveGhPagesUrl}
+            className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1"
+          >
+            <input
+              type="url"
+              value={ghPagesUrl}
+              onChange={(e) => setGhPagesUrl(e.target.value)}
+              placeholder={DEFAULT_GITHUB_PAGES_URL}
+              className="flex-1 h-10 px-3 rounded-xl bg-[#0B0F17] border border-slate-700 font-mono-tabular text-xs text-white focus:border-emerald-500 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shrink-0"
+            >
+              Zapisz adres URL
+            </button>
+          </form>
+        )}
       </div>
 
       {/* =====================================================================

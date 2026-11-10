@@ -164,14 +164,20 @@ export const WorkoutProfileChart: React.FC<WorkoutProfileChartProps> = ({
       : '';
 
   return (
-    <div className="relative w-full select-none rounded-xl bg-[#0B0F17] border border-slate-800 overflow-hidden">
-      {/* Crisp HTML overlay labels (never stretched by SVG preserveAspectRatio="none") */}
+    <div className="workout-chart-surface relative w-full select-none rounded-xl bg-[#0F172A] border border-slate-700 overflow-hidden">
+      {/* Crisp HTML overlay labels (opaque dark pills so yellow Z4 bars never clash with FTP text) */}
       {!compact && (
         <div className="pointer-events-none absolute top-1.5 left-2 right-2 z-10 flex items-center justify-between gap-2 text-[10px] font-mono-tabular leading-none">
-          <span className="px-1.5 py-0.5 rounded bg-[#0B0F17]/80 text-slate-400">
+          <span
+            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)', color: '#E2E8F0' }}
+            className="px-2 py-1 rounded-md border border-slate-700 font-semibold shadow-sm"
+          >
             Max {maxWattsOnChart}W
           </span>
-          <span className="px-1.5 py-0.5 rounded bg-[#0B0F17]/80 text-amber-400 font-bold">
+          <span
+            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)', color: '#FBBF24' }}
+            className="px-2 py-1 rounded-md border border-amber-500/50 font-bold shadow-sm"
+          >
             FTP {profile.ftpWatts}W
           </span>
         </div>

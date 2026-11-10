@@ -26,37 +26,51 @@
 }
 
 /* ============================================================================
-   EYE-FRIENDLY LOW-CONTRAST THEMES
-   1. .theme-soft-light : Muted Grayscale & Warm Off-Whites (Zero Glare)
-   2. .theme-soft-dark  : Balanced Slate Charcoal (Softened Dark Contrast)
+   HIGH-CONTRAST, EYE-FRIENDLY THEMES (ZERO YELLOW-ON-YELLOW / ZERO GLARE)
+   1. .theme-soft-light : Warm Daylight Slate (WCAG AAA Dark Text on Light Surfaces)
+   2. .theme-soft-dark  : Balanced Slate Charcoal Cockpit
    ============================================================================ */
 
-/* 1. SOFT GRAY LIGHT THEME (Stonowany Jasny — gama szarości i ciepłej bieli bez świecenia po oczach) */
+/* Keep telemetry workout chart canvas dark in both themes like a Garmin Edge screen
+   so 7 power zone colors, white live power trace, and yellow FTP line are always crisp */
+.workout-chart-surface {
+  background-color: #0F172A !important;
+  border-color: #334155 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   1. SOFT GRAY LIGHT THEME (Stonowany Jasny — bez efektu żółte-na-żółtym)
+   ---------------------------------------------------------------------------- */
 .theme-soft-light,
 body.theme-soft-light {
-  background-color: #E3E8EF !important;
-  color: #2A3342 !important;
+  background-color: #E2E8F0 !important;
+  color: #1E293B !important;
 }
 
 .theme-soft-light .bg-\[\#0B0F17\],
-.theme-soft-light .bg-\[\#0B0F17\]\/95 {
-  background-color: #DCE3EC !important;
+.theme-soft-light .bg-\[\#0B0F17\]\/95,
+.theme-soft-light .bg-\[\#0B0F17\]\/90,
+.theme-soft-light .bg-\[\#0B0F17\]\/80,
+.theme-soft-light .bg-\[\#0B0F17\]\/50,
+.theme-soft-light .bg-\[\#0B0F17\]\/40 {
+  background-color: #E2E8F0 !important;
 }
 
 .theme-soft-light header.bg-\[\#0B0F17\]\/95,
 .theme-soft-light nav.bg-\[\#0B0F17\]\/95 {
-  background-color: rgba(226, 232, 240, 0.94) !important;
+  background-color: rgba(226, 232, 240, 0.96) !important;
 }
 
-.theme-soft-light .bg-\[\#131B26\] {
-  background-color: #EEF2F6 !important;
-  box-shadow: 0 1px 3px rgba(42, 51, 66, 0.06);
+.theme-soft-light .bg-\[\#131B26\],
+.theme-soft-light .bg-\[\#131B26\]\/60 {
+  background-color: #F8FAFC !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .theme-soft-light .bg-slate-900,
 .theme-soft-light .bg-slate-900\/80,
 .theme-soft-light .bg-slate-950 {
-  background-color: #D5DEE9 !important;
+  background-color: #E2E8F0 !important;
 }
 
 .theme-soft-light .bg-slate-800,
@@ -64,125 +78,248 @@ body.theme-soft-light {
 .theme-soft-light .bg-slate-800\/80,
 .theme-soft-light .bg-slate-800\/70,
 .theme-soft-light .bg-slate-800\/60 {
-  background-color: #CFD8E4 !important;
+  background-color: #CBD5E1 !important;
+  color: #0F172A !important;
 }
 
 .theme-soft-light .hover\:bg-slate-700:hover,
 .theme-soft-light .hover\:bg-slate-800:hover {
-  background-color: #C2CDD9 !important;
+  background-color: #94A3B8 !important;
+  color: #0F172A !important;
 }
 
 .theme-soft-light .border-slate-800,
 .theme-soft-light .border-slate-800\/90,
 .theme-soft-light .border-slate-800\/80,
+.theme-soft-light .border-slate-800\/70,
 .theme-soft-light .border-slate-700 {
-  border-color: #C3CEDB !important;
+  border-color: #CBD5E1 !important;
 }
 
+/* Primary & Secondary Typography in Light Mode */
 .theme-soft-light .text-white,
 .theme-soft-light .text-slate-100,
 .theme-soft-light .text-slate-200 {
-  color: #263040 !important;
+  color: #0F172A !important;
 }
 
 .theme-soft-light .text-slate-300 {
-  color: #3E4C63 !important;
+  color: #334155 !important;
 }
 
 .theme-soft-light .text-slate-400,
 .theme-soft-light .text-slate-500 {
-  color: #58677E !important;
+  color: #475569 !important;
 }
 
-/* Harmonized Muted Accents for Soft Light Theme */
+/* High-Contrast Deep Accents for Light Mode (Never pale yellow/green/blue on light bg) */
 .theme-soft-light .text-emerald-400,
-.theme-soft-light .text-emerald-300 {
-  color: #0E8A63 !important;
+.theme-soft-light .text-emerald-300,
+.theme-soft-light .text-emerald-200 {
+  color: #065F46 !important;
 }
 
 .theme-soft-light .text-sky-400,
-.theme-soft-light .text-sky-300 {
-  color: #0369A1 !important;
+.theme-soft-light .text-sky-300,
+.theme-soft-light .text-sky-200 {
+  color: #075985 !important;
 }
 
 .theme-soft-light .text-amber-400,
-.theme-soft-light .text-amber-300 {
-  color: #B45309 !important;
+.theme-soft-light .text-amber-300,
+.theme-soft-light .text-amber-200,
+.theme-soft-light .text-yellow-400,
+.theme-soft-light .text-yellow-300,
+.theme-soft-light .text-yellow-200 {
+  color: #92400E !important;
 }
 
 .theme-soft-light .text-rose-400,
-.theme-soft-light .text-rose-300 {
-  color: #BE123C !important;
+.theme-soft-light .text-rose-300,
+.theme-soft-light .text-rose-200 {
+  color: #9F1239 !important;
 }
 
-.theme-soft-light .text-purple-400 {
-  color: #6D28D9 !important;
+.theme-soft-light .text-purple-400,
+.theme-soft-light .text-purple-300,
+.theme-soft-light .text-purple-200 {
+  color: #5B21B6 !important;
 }
 
-.theme-soft-light .bg-emerald-500 {
-  background-color: #169C72 !important;
-  color: #F4F7FA !important;
+/* Translucent Alert & Badge Containers in Light Mode — Crisp Tints with Deep Dark Text */
+.theme-soft-light .bg-amber-500\/10,
+.theme-soft-light .bg-amber-500\/15,
+.theme-soft-light .bg-amber-500\/20,
+.theme-soft-light .bg-amber-500\/25 {
+  background-color: #FEF3C7 !important;
+  border-color: #D97706 !important;
+  color: #78350F !important;
+}
+
+.theme-soft-light .bg-amber-500\/10 *,
+.theme-soft-light .bg-amber-500\/15 *,
+.theme-soft-light .bg-amber-500\/20 *,
+.theme-soft-light .bg-amber-500\/25 * {
+  color: #78350F;
+}
+
+.theme-soft-light .bg-emerald-500\/10,
+.theme-soft-light .bg-emerald-500\/15,
+.theme-soft-light .bg-emerald-500\/20,
+.theme-soft-light .bg-emerald-500\/25 {
+  background-color: #D1FAE5 !important;
+  border-color: #059669 !important;
+  color: #064E3B !important;
+}
+
+.theme-soft-light .bg-sky-500\/10,
+.theme-soft-light .bg-sky-500\/15,
+.theme-soft-light .bg-sky-500\/20,
+.theme-soft-light .bg-sky-500\/25 {
+  background-color: #E0F2FE !important;
+  border-color: #0284C7 !important;
+  color: #0C4A6E !important;
+}
+
+.theme-soft-light .bg-rose-500\/10,
+.theme-soft-light .bg-rose-500\/15,
+.theme-soft-light .bg-rose-500\/20,
+.theme-soft-light .bg-rose-500\/25 {
+  background-color: #FFE4E6 !important;
+  border-color: #E11D48 !important;
+  color: #881337 !important;
+}
+
+/* Solid Action Buttons — ALWAYS keep .text-slate-950 dark (#090D16) on bright buttons! */
+.theme-soft-light .text-slate-950,
+.theme-soft-dark .text-slate-950 {
+  color: #090D16 !important;
+}
+
+.theme-soft-light .bg-emerald-500,
+.theme-soft-light .bg-emerald-400 {
+  background-color: #10B981 !important;
+  color: #062219 !important;
+}
+
+.theme-soft-light .bg-emerald-500 *,
+.theme-soft-light .bg-emerald-400 *,
+.theme-soft-dark .bg-emerald-500.text-slate-950 *,
+.theme-soft-dark .bg-emerald-400.text-slate-950 * {
+  color: #062219 !important;
 }
 
 .theme-soft-light .bg-emerald-500:hover {
-  background-color: #128560 !important;
+  background-color: #059669 !important;
+  color: #FFFFFF !important;
 }
 
-.theme-soft-light .text-slate-950 {
-  color: #F4F7FA !important;
+.theme-soft-light .bg-emerald-500:hover * {
+  color: #FFFFFF !important;
 }
 
-/* 2. BALANCED SLATE DARK THEME (Stonowany Ciemny — brak czarnych dziur #000 i oślepiającej bieli #FFF) */
+.theme-soft-light .bg-amber-500,
+.theme-soft-light .bg-amber-400,
+.theme-soft-dark .bg-amber-500,
+.theme-soft-dark .bg-amber-400 {
+  background-color: #F59E0B !important;
+  color: #090D16 !important;
+}
+
+.theme-soft-light .bg-amber-500 *,
+.theme-soft-light .bg-amber-400 *,
+.theme-soft-dark .bg-amber-500.text-slate-950 *,
+.theme-soft-dark .bg-amber-400.text-slate-950 * {
+  color: #090D16 !important;
+}
+
+.theme-soft-light .bg-sky-500,
+.theme-soft-light .bg-sky-400,
+.theme-soft-dark .bg-sky-500,
+.theme-soft-dark .bg-sky-400 {
+  background-color: #0EA5E9 !important;
+  color: #081420 !important;
+}
+
+.theme-soft-light .bg-sky-500 *,
+.theme-soft-light .bg-sky-400 *,
+.theme-soft-dark .bg-sky-500.text-slate-950 *,
+.theme-soft-dark .bg-sky-400.text-slate-950 * {
+  color: #081420 !important;
+}
+
+.theme-soft-light .bg-rose-500,
+.theme-soft-light .bg-emerald-600 {
+  color: #FFFFFF !important;
+}
+
+.theme-soft-light .bg-rose-500 *,
+.theme-soft-light .bg-emerald-600 * {
+  color: #FFFFFF !important;
+}
+
+/* ----------------------------------------------------------------------------
+   2. BALANCED SLATE DARK THEME (Stonowany Ciemny — czytelny kontrast w kokpicie)
+   ---------------------------------------------------------------------------- */
 .theme-soft-dark,
 body.theme-soft-dark {
-  background-color: #1B222C !important;
-  color: #D8E0EA !important;
+  background-color: #111722 !important;
+  color: #E2E8F0 !important;
 }
 
 .theme-soft-dark .bg-\[\#0B0F17\] {
-  background-color: #1B222C !important;
+  background-color: #111722 !important;
 }
 
 .theme-soft-dark header.bg-\[\#0B0F17\]\/95,
 .theme-soft-dark nav.bg-\[\#0B0F17\]\/95 {
-  background-color: rgba(27, 34, 44, 0.94) !important;
+  background-color: rgba(17, 23, 34, 0.95) !important;
 }
 
 .theme-soft-dark .bg-\[\#131B26\] {
-  background-color: #242E3B !important;
+  background-color: #1B2432 !important;
 }
 
 .theme-soft-dark .bg-slate-800,
 .theme-soft-dark .bg-slate-800\/90,
 .theme-soft-dark .bg-slate-800\/80 {
-  background-color: #2E3A4A !important;
+  background-color: #263346 !important;
 }
 
 .theme-soft-dark .border-slate-800,
 .theme-soft-dark .border-slate-800\/90,
 .theme-soft-dark .border-slate-800\/80 {
-  border-color: #344255 !important;
+  border-color: #2E3D52 !important;
 }
 
 .theme-soft-dark .border-slate-700 {
-  border-color: #3E4E63 !important;
+  border-color: #3B4D66 !important;
+}
+
+/* Ensure amber/yellow banners in dark mode have a deep dark bronze backdrop, never muddy yellow-on-yellow */
+.theme-soft-dark .bg-amber-500\/10,
+.theme-soft-dark .bg-amber-500\/15,
+.theme-soft-dark .bg-amber-500\/20,
+.theme-soft-dark .bg-amber-500\/25 {
+  background-color: rgba(120, 53, 15, 0.42) !important;
+  border-color: rgba(245, 158, 11, 0.65) !important;
 }
 
 .theme-soft-dark .text-white {
-  color: #DCE3EC !important;
+  color: #F1F5F9 !important;
 }
 
 .theme-soft-dark .text-slate-100,
 .theme-soft-dark .text-slate-200 {
-  color: #CFD8E3 !important;
+  color: #E2E8F0 !important;
 }
 
 .theme-soft-dark .text-slate-300 {
-  color: #B4C0D0 !important;
+  color: #CBD5E1 !important;
 }
 
 .theme-soft-dark .text-slate-400 {
-  color: #8F9EB3 !important;
+  color: #94A3B8 !important;
 }
 
 /* Custom Google Sign-In Material Button */
@@ -217,9 +354,9 @@ body.theme-soft-dark {
 }
 
 .theme-soft-light .gsi-material-button {
-  background-color: #E2E8F0;
+  background-color: #FFFFFF;
   border-color: #CBD5E1;
-  color: #263040;
+  color: #0F172A;
 }
 
 .gsi-material-button:hover {
@@ -228,7 +365,7 @@ body.theme-soft-dark {
 }
 
 .theme-soft-light .gsi-material-button:hover {
-  background-color: #CBD5E1;
+  background-color: #F1F5F9;
   border-color: #94A3B8;
 }
 

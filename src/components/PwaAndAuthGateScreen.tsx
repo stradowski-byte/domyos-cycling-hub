@@ -198,6 +198,31 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
               </button>
             )}
 
+            <div className="rounded-2xl bg-[#0B0F17] border border-sky-500/40 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+              <div className="min-w-0">
+                <div className="text-[11px] text-slate-400">
+                  Oficjalny adres instalacji aplikacji (GitHub Pages):
+                </div>
+                <a
+                  href="https://stradowski-by.github.io/domyos-cycling-hub/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono-tabular font-bold text-emerald-400 hover:underline break-all"
+                >
+                  https://stradowski-by.github.io/domyos-cycling-hub/
+                </a>
+              </div>
+              <a
+                href="https://stradowski-by.github.io/domyos-cycling-hub/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[38px] px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-colors"
+              >
+                <Smartphone className="w-4 h-4 shrink-0" />
+                <span>Otwórz GitHub Pages</span>
+              </a>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div className="rounded-2xl bg-[#0B0F17] border border-slate-800 p-4 space-y-1.5">
                 <div className="font-bold text-emerald-400 flex items-center gap-1.5">
