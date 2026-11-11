@@ -1,4 +1,4 @@
-const CACHE_NAME = 'domyos-cycling-hub-v2.2.0';
+const CACHE_NAME = 'domyos-cycling-hub-v2.2.2';
 const PRECACHE_ASSETS = [
   './',
   './index.html',

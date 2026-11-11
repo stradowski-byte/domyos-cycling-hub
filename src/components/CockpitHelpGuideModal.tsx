@@ -170,40 +170,36 @@ interface BubbleHorizontalBounds {
   width: number;
 }
 
-const ACCENT_STYLES: Record<
+const ACCENT_HEX: Record<
   AccentTheme,
   {
-    spotlightBorder: string;
-    spotlightBg: string;
-    badgeBg: string;
-    cardBorder: string;
-    triangleText: string;
-    titleColor: string;
+    borderHex: string;
+    glowRgba: string;
+    badgeBgHex: string;
+    badgeTextHex: string;
+    titleClass: string;
   }
 > = {
   emerald: {
-    spotlightBorder: 'border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.45)]',
-    spotlightBg: 'bg-emerald-500/10',
-    badgeBg: 'bg-emerald-400 text-slate-950',
-    cardBorder: 'border-emerald-400',
-    triangleText: 'text-emerald-400',
-    titleColor: 'text-emerald-300',
+    borderHex: '#10B981',
+    glowRgba: 'rgba(16, 185, 129, 0.5)',
+    badgeBgHex: '#10B981',
+    badgeTextHex: '#062219',
+    titleClass: 'cockpit-tour-title-emerald',
   },
   sky: {
-    spotlightBorder: 'border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.45)]',
-    spotlightBg: 'bg-sky-500/10',
-    badgeBg: 'bg-sky-400 text-slate-950',
-    cardBorder: 'border-sky-400',
-    triangleText: 'text-sky-400',
-    titleColor: 'text-sky-300',
+    borderHex: '#38BDF8',
+    glowRgba: 'rgba(56, 189, 248, 0.5)',
+    badgeBgHex: '#38BDF8',
+    badgeTextHex: '#081420',
+    titleClass: 'cockpit-tour-title-sky',
   },
   amber: {
-    spotlightBorder: 'border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.45)]',
-    spotlightBg: 'bg-amber-500/10',
-    badgeBg: 'bg-amber-400 text-slate-950',
-    cardBorder: 'border-amber-400',
-    triangleText: 'text-amber-400',
-    titleColor: 'text-amber-300',
+    borderHex: '#FBBF24',
+    glowRgba: 'rgba(251, 191, 36, 0.5)',
+    badgeBgHex: '#FBBF24',
+    badgeTextHex: '#090D16',
+    titleClass: 'cockpit-tour-title-amber',
   },
 };
 
@@ -252,7 +248,7 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
         }
 
         if (minTop !== Infinity) {
-          const pad = 4;
+          const pad = 3;
           const top = Math.max(2, minTop - pad);
           const left = Math.max(2, minLeft - pad);
           const right = Math.min(window.innerWidth - 2, maxRight + pad);
@@ -271,7 +267,6 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
 
       setTargetRects(nextRects);
 
-      // Measure rendered callout bubbles so each triangular beak aligns horizontally with its target centerX
       window.requestAnimationFrame(() => {
         const nextBubbles: Record<string, BubbleHorizontalBounds> = {};
         for (const item of currentPage.items) {
@@ -333,14 +328,15 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
   return (
     <div
       onClick={handleAdvanceOrClose}
-      className="fixed inset-0 z-50 bg-slate-950/65 select-none overflow-hidden cursor-pointer"
+      style={{ backgroundColor: 'rgba(15, 23, 42, 0.32)' }}
+      className="fixed inset-0 z-50 select-none overflow-hidden cursor-pointer"
       title="Stuknij w dowolne miejsce na ekranie, aby przejść do następnej strony"
     >
-      {/* 1. HIGHLIGHT FRAMES + NUMBER BADGES AROUND EACH OF THE 2-3 ACTIVE TOOLS ON THIS PAGE */}
+      {/* 1. 100% TRANSPARENT HIGHLIGHT FRAMES + NUMBER BADGES AROUND EACH ACTIVE TOOL */}
       {currentPage.items.map((item) => {
         const rect = targetRects[item.selector];
         if (!rect) return null;
-        const styleTheme = ACCENT_STYLES[item.accent];
+        const theme = ACCENT_HEX[item.accent];
 
         return (
           <div
@@ -351,11 +347,18 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
               left: `${rect.left}px`,
               width: `${rect.width}px`,
               height: `${rect.height}px`,
+              backgroundColor: 'transparent',
+              border: `3px solid ${theme.borderHex}`,
+              boxShadow: `0 0 18px ${theme.glowRgba}`,
             }}
-            className={`rounded-xl border-2 ${styleTheme.spotlightBorder} ${styleTheme.spotlightBg} pointer-events-none transition-all duration-200 z-10`}
+            className="cockpit-tour-spotlight rounded-xl pointer-events-none transition-all duration-200 z-10"
           >
             <span
-              className={`absolute -top-2.5 -left-1.5 w-5 h-5 rounded-full ${styleTheme.badgeBg} font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shadow-md`}
+              style={{
+                backgroundColor: theme.badgeBgHex,
+                color: theme.badgeTextHex,
+              }}
+              className="absolute -top-3 -left-2 w-5 h-5 rounded-full font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shadow-md"
             >
               {item.markerNumber}
             </span>
@@ -363,14 +366,14 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
         );
       })}
 
-      {/* 2. 2-3 CALLOUT BUBBLES WITH SIMPLE TRIANGULAR BEAKS (▲ / ▼) POINTING AT THEIR TARGETS */}
+      {/* 2. 100% OPAQUE HIGH-CONTRAST CALLOUT BUBBLES WITH SIMPLE TRIANGULAR BEAKS (▲ / ▼) */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={
           placeCalloutsBelow
             ? {
                 position: 'fixed',
-                top: `${Math.min(viewportH - 250, groupMaxBottom + 14)}px`,
+                top: `${Math.min(viewportH - 255, groupMaxBottom + 14)}px`,
                 left: '50%',
                 transform: 'translateX(-50%)',
               }
@@ -390,10 +393,9 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
         {currentPage.items.map((item) => {
           const rect = targetRects[item.selector];
           const bBounds = bubbleBounds[item.selector];
-          const styleTheme = ACCENT_STYLES[item.accent];
+          const theme = ACCENT_HEX[item.accent];
 
           // Compute exact horizontal X offset for the triangular beak on the card edge
-          // so it points toward the center of its corresponding tool
           const beakLeftPx =
             rect && bBounds
               ? Math.max(
@@ -408,7 +410,12 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
               ref={(el) => {
                 bubbleRefs.current[item.selector] = el;
               }}
-              className={`relative rounded-2xl bg-[#131B26]/95 border-2 ${styleTheme.cardBorder} px-3.5 py-2.5 shadow-[0_14px_35px_rgba(0,0,0,0.85)] space-y-1`}
+              style={{
+                backgroundColor: '#0F172A',
+                borderColor: theme.borderHex,
+                color: '#F8FAFC',
+              }}
+              className="cockpit-tour-bubble relative rounded-2xl border-2 px-3.5 py-2.5 shadow-[0_18px_40px_rgba(0,0,0,0.85)] space-y-1"
             >
               {/* UPWARD TRIANGULAR BEAK (▲) AT TOP BORDER WHEN BUBBLE IS BELOW THE TOOL */}
               {placeCalloutsBelow && (
@@ -418,13 +425,8 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
                   }}
                   className="absolute -top-[11px] -translate-x-1/2 pointer-events-none"
                 >
-                  <svg
-                    width="22"
-                    height="11"
-                    viewBox="0 0 22 11"
-                    className={`${styleTheme.triangleText} fill-current`}
-                  >
-                    <path d="M11 0L22 11H0L11 0Z" />
+                  <svg width="22" height="11" viewBox="0 0 22 11">
+                    <path d="M11 0L22 11H0L11 0Z" fill={theme.borderHex} />
                   </svg>
                 </div>
               )}
@@ -437,31 +439,33 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
                   }}
                   className="absolute -bottom-[11px] -translate-x-1/2 pointer-events-none"
                 >
-                  <svg
-                    width="22"
-                    height="11"
-                    viewBox="0 0 22 11"
-                    className={`${styleTheme.triangleText} fill-current`}
-                  >
-                    <path d="M11 11L0 0H22L11 11Z" />
+                  <svg width="22" height="11" viewBox="0 0 22 11">
+                    <path d="M11 11L0 0H22L11 11Z" fill={theme.borderHex} />
                   </svg>
                 </div>
               )}
 
               <div className="flex items-center gap-2">
                 <span
-                  className={`w-5 h-5 rounded-full ${styleTheme.badgeBg} font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shrink-0`}
+                  style={{
+                    backgroundColor: theme.badgeBgHex,
+                    color: theme.badgeTextHex,
+                  }}
+                  className="w-5 h-5 rounded-full font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shrink-0"
                 >
                   {item.markerNumber}
                 </span>
                 <h4
-                  className={`text-xs sm:text-sm font-extrabold ${styleTheme.titleColor} leading-tight`}
+                  className={`text-xs sm:text-sm font-extrabold ${theme.titleClass} leading-tight`}
                 >
                   {item.title}
                 </h4>
               </div>
 
-              <p className="text-[11px] sm:text-xs text-slate-100 leading-relaxed pl-7">
+              <p
+                style={{ color: '#F1F5F9' }}
+                className="cockpit-tour-note text-[11px] sm:text-xs leading-relaxed pl-7"
+              >
                 {item.shortNote}
               </p>
             </div>
@@ -472,19 +476,25 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
       {/* 3. COMPACT NAVIGATION BAR (WSTECZ / KROPKI 1..5 / DALEJ / ZAMKNIJ) */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`fixed left-1/2 -translate-x-1/2 w-[calc(100vw-20px)] max-w-xl rounded-2xl bg-[#0B0F17]/95 border border-slate-700 px-3.5 py-2.5 shadow-2xl flex flex-col gap-1.5 cursor-default z-30 ${
+        style={{
+          backgroundColor: '#0F172A',
+          borderColor: '#334155',
+          color: '#F8FAFC',
+        }}
+        className={`cockpit-tour-nav fixed left-1/2 -translate-x-1/2 w-[calc(100vw-20px)] max-w-xl rounded-2xl border-2 px-3.5 py-2.5 shadow-[0_18px_40px_rgba(0,0,0,0.85)] flex flex-col gap-1.5 cursor-default z-30 ${
           navBarAtTop ? 'top-3' : 'bottom-3'
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] sm:text-xs font-extrabold text-emerald-400 truncate">
+          <span className="cockpit-tour-title-emerald text-[11px] sm:text-xs font-extrabold truncate">
             {currentPage.pageTitle}
           </span>
 
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[30px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 shrink-0 transition-colors"
+            style={{ backgroundColor: '#1E293B', color: '#F8FAFC' }}
+            className="min-h-[30px] px-2.5 py-1 rounded-lg hover:opacity-90 text-[11px] font-bold flex items-center gap-1 shrink-0 transition-opacity"
           >
             <span>Zamknij</span>
             <X className="w-3.5 h-3.5" />
@@ -496,7 +506,8 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
             type="button"
             onClick={() => setPageIdx((prev) => Math.max(0, prev - 1))}
             disabled={pageIdx === 0}
-            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 flex items-center gap-1 transition-colors"
+            style={{ backgroundColor: '#1E293B', color: '#F8FAFC' }}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl disabled:opacity-40 text-xs font-bold flex items-center gap-1 transition-opacity"
           >
             <ChevronLeft className="w-4 h-4 shrink-0" />
             <span>Wstecz</span>
@@ -509,10 +520,11 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
                 key={p.pageNumber}
                 type="button"
                 onClick={() => setPageIdx(idx)}
+                style={{
+                  backgroundColor: idx === pageIdx ? '#10B981' : '#334155',
+                }}
                 className={`h-2.5 rounded-full transition-all ${
-                  idx === pageIdx
-                    ? 'w-6 bg-emerald-400'
-                    : 'w-2.5 bg-slate-700 hover:bg-slate-500'
+                  idx === pageIdx ? 'w-6' : 'w-2.5'
                 }`}
                 title={`Przejdź do strony ${p.pageNumber}`}
               />
@@ -523,7 +535,8 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
             <button
               type="button"
               onClick={() => setPageIdx((prev) => prev + 1)}
-              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1 transition-colors"
+              style={{ backgroundColor: '#10B981', color: '#062219' }}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1 transition-opacity"
             >
               <span>Dalej ({pageIdx + 1}/5)</span>
               <ChevronRight className="w-4 h-4 shrink-0" />
@@ -532,7 +545,8 @@ export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1.5 transition-colors"
+              style={{ backgroundColor: '#10B981', color: '#062219' }}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-opacity"
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
               <span>Gotowe!</span>

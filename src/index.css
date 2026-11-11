@@ -395,3 +395,56 @@ body.theme-soft-dark {
   width: 18px;
   min-width: 18px;
 }
+
+/* ============================================================================
+   COCKPIT HELP TOUR OVERLAY — THEME-IMMUNE SPOTLIGHT & OPAQUE CALLOUT CARDS
+   Guarantees 100% transparent highlight frames and 100% solid high-contrast
+   callout bubbles in both .theme-soft-light (sun) and .theme-soft-dark (moon)
+   ============================================================================ */
+.cockpit-tour-spotlight,
+.theme-soft-light .cockpit-tour-spotlight,
+.theme-soft-dark .cockpit-tour-spotlight {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+.cockpit-tour-bubble,
+.theme-soft-light .cockpit-tour-bubble,
+.theme-soft-dark .cockpit-tour-bubble,
+.cockpit-tour-nav,
+.theme-soft-light .cockpit-tour-nav,
+.theme-soft-dark .cockpit-tour-nav {
+  background-color: #0F172A !important;
+  background-image: none !important;
+  border-color: #334155;
+  color: #F8FAFC !important;
+}
+
+.cockpit-tour-bubble p,
+.cockpit-tour-bubble .cockpit-tour-note,
+.theme-soft-light .cockpit-tour-bubble p,
+.theme-soft-light .cockpit-tour-bubble .cockpit-tour-note,
+.theme-soft-dark .cockpit-tour-bubble p,
+.theme-soft-dark .cockpit-tour-bubble .cockpit-tour-note {
+  color: #F1F5F9 !important;
+}
+
+.cockpit-tour-title-emerald,
+.theme-soft-light .cockpit-tour-title-emerald,
+.theme-soft-dark .cockpit-tour-title-emerald {
+  color: #34D399 !important;
+}
+
+.cockpit-tour-title-sky,
+.theme-soft-light .cockpit-tour-title-sky,
+.theme-soft-dark .cockpit-tour-title-sky {
+  color: #38BDF8 !important;
+}
+
+.cockpit-tour-title-amber,
+.theme-soft-light .cockpit-tour-title-amber,
+.theme-soft-dark .cockpit-tour-title-amber {
+  color: #FBBF24 !important;
+}
+
+

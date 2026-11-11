@@ -99,20 +99,20 @@ export async function forceUpdatePwaAndClearCaches(
     onNotify?.(
       'Sprawdzam i pobieram najnowszą wersję aplikacji z GitHub Pages...'
     );
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      for (const reg of regs) {
-        await reg.update();
-        if (reg.waiting) {
-          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-        }
-      }
-    }
     if ('caches' in window) {
       const keys = await window.caches.keys();
       await Promise.all(keys.map((k) => window.caches.delete(k)));
     }
-    window.setTimeout(() => window.location.reload(), 650);
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        await reg.unregister().catch(() => {});
+      }
+    }
+    window.setTimeout(() => window.location.reload(), 450);
   } catch {
     window.location.reload();
   }
