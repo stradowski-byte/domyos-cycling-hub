@@ -95,7 +95,11 @@ import {
   uploadActivityFitToIntervals,
 } from './services/intervalsIcuService';
 import { AccurateWorkoutTimer } from './services/workoutTimerWorker';
-import { useOnlineStatus, usePWAInstall } from './services/usePWAInstall';
+import {
+  forceUpdatePwaAndClearCaches,
+  useOnlineStatus,
+  usePWAInstall,
+} from './services/usePWAInstall';
 import { LiveCockpitView, formatDurationClock } from './components/LiveCockpitView';
 import { WorkoutsAndRampBuilderView } from './components/WorkoutsAndRampBuilderView';
 import { AnalyticsAndProgressView } from './components/AnalyticsAndProgressView';
@@ -292,28 +296,8 @@ export default function App() {
     setIsPwaInstallGuideOpen(true);
   };
 
-  const handleForceUpdatePwa = async () => {
-    try {
-      showToast(
-        'Sprawdzam i pobieram najnowszą wersję aplikacji z GitHub Pages...'
-      );
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        for (const reg of regs) {
-          await reg.update();
-          if (reg.waiting) {
-            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          }
-        }
-      }
-      if ('caches' in window) {
-        const keys = await window.caches.keys();
-        await Promise.all(keys.map((k) => window.caches.delete(k)));
-      }
-      window.setTimeout(() => window.location.reload(), 650);
-    } catch {
-      window.location.reload();
-    }
+  const handleForceUpdatePwa = () => {
+    forceUpdatePwaAndClearCaches(showToast);
   };
 
   // Automatic PWA Service Worker Update on Startup
@@ -472,7 +456,7 @@ export default function App() {
               for (const a of prev) {
                 if (
                   !cloudIds.has(a.id) &&
-                  (a.pendingFirebaseSync || a.pendingDriveSync) &&
+                  a.pendingFirebaseSync &&
                   !a.syncedToFirebase
                 ) {
                   map.set(a.id, a);
@@ -751,8 +735,6 @@ export default function App() {
       fitBase64: localOpfsRes.fitBase64,
       pendingFirebaseSync: true,
       syncedToFirebase: false,
-      syncedToGoogleDrive: false,
-      pendingDriveSync: true,
     };
 
     const summaryForState: CompletedActivity = {
@@ -782,8 +764,6 @@ export default function App() {
                   ...a,
                   syncedToFirebase: true,
                   pendingFirebaseSync: false,
-                  syncedToGoogleDrive: true,
-                  pendingDriveSync: false,
                 }
               : a
           )
@@ -794,8 +774,6 @@ export default function App() {
                 ...prev,
                 syncedToFirebase: true,
                 pendingFirebaseSync: false,
-                syncedToGoogleDrive: true,
-                pendingDriveSync: false,
               }
             : null
         );
@@ -1040,8 +1018,6 @@ export default function App() {
           ...a,
           syncedToFirebase: true,
           pendingFirebaseSync: false,
-          syncedToGoogleDrive: true,
-          pendingDriveSync: false,
         }))
       );
       showToast(
@@ -1129,8 +1105,6 @@ export default function App() {
                 ...a,
                 syncedToFirebase: true,
                 pendingFirebaseSync: false,
-                syncedToGoogleDrive: true,
-                pendingDriveSync: false,
               }
             : a
         )
@@ -1230,10 +1204,7 @@ export default function App() {
 
   // Pending Offline Sync Queue
   const pendingFirebaseActivities = activities.filter(
-    (a) =>
-      (a.pendingFirebaseSync || a.pendingDriveSync) &&
-      !a.syncedToFirebase &&
-      !a.syncedToGoogleDrive
+    (a) => a.pendingFirebaseSync && !a.syncedToFirebase
   );
 
   const handleFlushPendingSync = async () => {
@@ -1262,8 +1233,6 @@ export default function App() {
                 ...a,
                 syncedToFirebase: true,
                 pendingFirebaseSync: false,
-                syncedToGoogleDrive: true,
-                pendingDriveSync: false,
               }
             : a
         )
@@ -1316,8 +1285,6 @@ export default function App() {
                       ...a,
                       syncedToFirebase: true,
                       pendingFirebaseSync: false,
-                      syncedToGoogleDrive: true,
-                      pendingDriveSync: false,
                     }
                   : a
               )
@@ -2096,7 +2063,7 @@ export default function App() {
             latestTsb={latestTsb}
             lastCompletedActivity={lastProfileActivity}
             isSyncingIntervals={isSyncingIntervals}
-            isSyncingDriveTxt={isSyncingFirebase}
+            isSyncingFirebase={isSyncingFirebase}
             onSelectAndLoadWorkout={(w, startNow) => {
               setSelectedWorkoutId(w.id);
               setCurrentBlockIndex(0);
@@ -2153,7 +2120,7 @@ export default function App() {
               showToast('Usunięto trening z biblioteki, OPFS i Firebase.');
             }}
             onSyncFromIntervalsIcu={handleSyncFromIntervalsIcu}
-            onSyncTxtWorkoutsFolder={handleSyncAllToFirebase}
+            onSyncWithFirebase={handleSyncAllToFirebase}
           />
         )}
 

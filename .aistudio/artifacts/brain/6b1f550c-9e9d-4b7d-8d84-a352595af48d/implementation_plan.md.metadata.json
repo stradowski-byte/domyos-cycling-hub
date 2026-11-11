@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan wdrożenia 7 poprawek po udanym teście: moduł prędkości i dystansu z obwodu koła 700c (2.105 m) i czasu jazdy, automatyczne okno zakończenia po ostatnim interwale, czerwony alert niskiej kadencji, usuwanie wykonanych treningów z OPFS i Firebase, zapisywanie flag synchronizacji Intervals.icu/Google Fit bezpośrednio w Firebase Firestore (brak duplikatów po wyczyszczeniu cache), naprawa błędu 403 Google Fitness API z linkiem aktywacyjnym i przełącznikiem oraz przycisk wymuszenia aktualizacji aplikacji PWA z GitHub Pages.",
-  "updatedAt":  "2026-11-11T11:26:44.468704545Z",
+  "summary":  "Plan pelnego czyszczenia, refaktoryzacji i optymalizacji kodu Domyos Cycling Hub (naprawa ID rekomendacji dnia, ujednolicenie klucza profilu OPFS i usuniecie katalogu default, usuniecie zaszlosci Google Drive, deduplikacja helperow PWA/FIT oraz optymalizacja O(N) dla Peak Power i Normalized Power).",
+  "updatedAt":  "2026-11-11T12:07:31.630378725Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -51,6 +51,7 @@ import {
   DEFAULT_WORKOUT_TAGS,
   inferWorkoutTags,
 } from '../services/rampAndPhysiologyEngine';
+import { forceUpdatePwaAndClearCaches } from '../services/usePWAInstall';
 import { doc, setDoc } from 'firebase/firestore';
 import {
   activeConfig,
@@ -293,28 +294,8 @@ export const ProfilesAndCloudSettingsView: React.FC<
     }
   };
 
-  const handleForceSwUpdate = async () => {
-    try {
-      onNotifyToast?.(
-        'Pobieram najnowszą wersję aplikacji z GitHub Pages i odświeżam pamięć podręczną PWA...'
-      );
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        for (const reg of regs) {
-          await reg.update();
-          if (reg.waiting) {
-            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          }
-        }
-      }
-      if ('caches' in window) {
-        const keys = await window.caches.keys();
-        await Promise.all(keys.map((k) => window.caches.delete(k)));
-      }
-      window.setTimeout(() => window.location.reload(), 650);
-    } catch {
-      window.location.reload();
-    }
+  const handleForceSwUpdate = () => {
+    forceUpdatePwaAndClearCaches(onNotifyToast);
   };
 
   const handleOpenTxtFileEditor = async (entry: LocalOpfsFileEntry) => {

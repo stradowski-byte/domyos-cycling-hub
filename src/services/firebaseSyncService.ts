@@ -29,6 +29,7 @@ import {
   TelemetryRecord,
 } from '../types/cycling';
 import {
+  buildCleanActivityFitFileName,
   encodeActivityToFitBase64,
   encodeActivityToFitBlob,
 } from './fitEncoder';
@@ -48,7 +49,7 @@ import {
 
 export const CURRENT_APP_VERSION = '2.4.0';
 const LS_OFFLINE_FS_MANIFEST_KEY = 'domyos_offline_fs_manifest_v1';
-const LS_PROFILES_KEY = 'domyos_hub_profiles_v1';
+const LS_PROFILES_KEY = 'domyos_hub_google_profile_v2';
 export const LS_WORKOUT_TAGS_KEY = 'domyos_hub_workout_tags_v1';
 export const LS_PENDING_SYNC_QUEUE_KEY = 'domyos_hub_pending_sync_queue_v1';
 
@@ -806,8 +807,6 @@ export async function saveCompletedActivityToFirestore(
     fitBase64,
     syncedToFirebase: true,
     pendingFirebaseSync: false,
-    syncedToGoogleDrive: true,
-    pendingDriveSync: false,
   });
 
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -906,13 +905,7 @@ export async function deleteCompletedActivityEverywhere(
   try {
     const tree = await getOrCreateOpfsTree(undefined, [activity.profileId]);
     if (tree) {
-      const datePart = activity.startedAtIso.slice(0, 10);
-      const cleanName = activity.workoutName
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9_-]/g, '_')
-        .slice(0, 32);
-      const fitFileName = `${datePart}_${cleanName}.fit`;
+      const fitFileName = buildCleanActivityFitFileName(activity);
 
       for (const branch of Object.values(tree.userDataDirs)) {
         try {
@@ -1034,8 +1027,6 @@ export async function syncAllStateToFirestore(params: {
         fitBase64,
         syncedToFirebase: true,
         pendingFirebaseSync: false,
-        syncedToGoogleDrive: true,
-        pendingDriveSync: false,
       });
       actBatch.set(doc(db, 'completedWorkouts', act.id), firestoreDoc, {
         merge: true,
@@ -1276,16 +1267,49 @@ export function getKnownProfileIds(extraIds: ProfileId[] = []): ProfileId[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        Object.keys(parsed).forEach((k) => {
-          if (k && k !== 'shared' && k !== 'engine') idSet.add(k);
-        });
+        if (typeof parsed.id === 'string') {
+          if (
+            parsed.id &&
+            parsed.id !== 'shared' &&
+            parsed.id !== 'engine' &&
+            parsed.id !== 'default'
+          ) {
+            idSet.add(parsed.id);
+          }
+        } else {
+          Object.keys(parsed).forEach((k) => {
+            if (k && k !== 'shared' && k !== 'engine' && k !== 'default') {
+              idSet.add(k);
+            }
+          });
+        }
+      }
+    }
+    if (idSet.size === 0) {
+      const ridersRaw = localStorage.getItem(KNOWN_RIDERS_STORAGE_KEY);
+      if (ridersRaw) {
+        const riders = JSON.parse(ridersRaw);
+        if (Array.isArray(riders)) {
+          riders.forEach((r: KnownGoogleRider) => {
+            if (
+              r?.profileId &&
+              r.profileId !== 'shared' &&
+              r.profileId !== 'engine' &&
+              r.profileId !== 'default'
+            ) {
+              idSet.add(r.profileId);
+            }
+          });
+        }
       }
     }
   } catch {
     // ignore
   }
   for (const id of extraIds) {
-    if (id && id !== 'shared' && id !== 'engine') idSet.add(id);
+    if (id && id !== 'shared' && id !== 'engine' && id !== 'default') {
+      idSet.add(id);
+    }
   }
   if (idSet.size === 0) {
     idSet.add('default');
@@ -1344,6 +1368,7 @@ async function getOrCreateOpfsTree(
         .replace(/[^a-zA-Z0-9_-]/g, '_') || 'DomyosCyclingHub';
 
     const profileIds = getKnownProfileIds(extraProfileIds);
+    const hasRealProfile = profileIds.some((pid) => pid !== 'default');
 
     const opfsRoot = await navigator.storage.getDirectory();
     const appRootDir = await opfsRoot.getDirectoryHandle(cleanRoot, { create: true });
@@ -1354,6 +1379,39 @@ async function getOrCreateOpfsTree(
     const userDataRootDir = await appRootDir.getDirectoryHandle('User_Data', {
       create: true,
     });
+
+    // Automatically clean up legacy orphaned 'default' directories when a real user profile is active
+    if (hasRealProfile) {
+      try {
+        await workoutsRootDir.removeEntry('default', { recursive: true });
+      } catch {
+        // ignore if not present
+      }
+      try {
+        const defaultUserDir = await userDataRootDir.getDirectoryHandle('default', {
+          create: false,
+        });
+        let hasAnyFitFile = false;
+        try {
+          const defaultFitDir = await defaultUserDir.getDirectoryHandle('Workouts_FIT', {
+            create: false,
+          });
+          for await (const [entryName, entryHandle] of (defaultFitDir as any).entries()) {
+            if (entryHandle.kind === 'file' && entryName.endsWith('.fit')) {
+              hasAnyFitFile = true;
+              break;
+            }
+          }
+        } catch {
+          // no Workouts_FIT subfolder
+        }
+        if (!hasAnyFitFile) {
+          await userDataRootDir.removeEntry('default', { recursive: true });
+        }
+      } catch {
+        // ignore if default does not exist
+      }
+    }
 
     const workoutsUserDirs: Record<string, FileSystemDirectoryHandle> = {};
     workoutsUserDirs.shared = await workoutsRootDir.getDirectoryHandle('shared', {
@@ -1715,13 +1773,7 @@ export async function saveCompletedRideAndStateToLocalOpfs(
   profile: AthleteProfile,
   allActivities: CompletedActivity[]
 ): Promise<{ fitFileName: string; savedToOpfs: boolean; fitBase64: string }> {
-  const datePart = activity.startedAtIso.slice(0, 10);
-  const cleanName = activity.workoutName
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, 32);
-  const fitFileName = `${datePart}_${cleanName}.fit`;
+  const fitFileName = buildCleanActivityFitFileName(activity);
 
   const hydratedActivity = await ensureActivityHasRecords(activity);
   const fitBase64 = encodeActivityToFitBase64(hydratedActivity);

@@ -50,12 +50,12 @@ interface WorkoutsAndRampBuilderViewProps {
   latestTsb?: number;
   lastCompletedActivity?: CompletedActivity | null;
   isSyncingIntervals: boolean;
-  isSyncingDriveTxt?: boolean;
+  isSyncingFirebase?: boolean;
   onSelectAndLoadWorkout: (workout: StructuredWorkout, startImmediately?: boolean) => void;
   onSaveWorkout: (workout: StructuredWorkout) => void;
   onDeleteWorkout: (workoutId: string) => void;
   onSyncFromIntervalsIcu: () => void;
-  onSyncTxtWorkoutsFolder?: () => void;
+  onSyncWithFirebase?: () => void;
 }
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
@@ -75,12 +75,12 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
   latestTsb = 2,
   lastCompletedActivity = null,
   isSyncingIntervals,
-  isSyncingDriveTxt = false,
+  isSyncingFirebase = false,
   onSelectAndLoadWorkout,
   onSaveWorkout,
   onDeleteWorkout,
   onSyncFromIntervalsIcu,
-  onSyncTxtWorkoutsFolder,
+  onSyncWithFirebase,
 }) => {
   const [filterScope, setFilterScope] = useState<'all' | 'intervals' | 'custom'>('all');
   const [durationFilter, setDurationFilter] = useState<'all' | 'short' | 'medium' | 'long'>('all');
@@ -241,7 +241,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
 
     let shortPreferredIds = [
       'w_ramp_sweetspot',
-      'w_over_under_crisscross',
+      'w_threshold_over_unders_50',
       'w_cardio_fatburn_z2',
     ];
     let standardPreferredIds = [
@@ -258,12 +258,12 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
         : `Wysokie zmęczenie kumulacyjne (TSB ${latestTsb}) — dzisiaj regeneracja lub lekka baza tlenowa.`;
       shortPreferredIds = [
         'w_recovery_active_spin_30',
-        'w_recovery_openers_25',
+        'w_recovery_openers_30',
         'w_cardio_fatburn_z2',
       ];
       standardPreferredIds = [
         'w_z2_steady_45',
-        'w_z2_cadence_drills_50',
+        'w_z2_cadence_bursts_50',
         'w_z2_wave_endurance_60',
       ];
       shortSubtitle = 'Szybki rozjazd regeneracyjny Z1/Z2 (30 min) przyspieszający wypłukiwanie mleczanu';
@@ -287,7 +287,7 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
       shortPreferredIds = [
         'w_vo2_ronnestad_30_15',
         'w_vo2_seiler_4x4',
-        'w_vo2_billat_30_30',
+        'w_vo2_30_30',
       ];
       standardPreferredIds = [
         'w_sweetspot_endurance_65',
@@ -754,16 +754,16 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
               <span className="truncate">Wczytaj .TXT</span>
             </button>
 
-            {onSyncTxtWorkoutsFolder && (
+            {onSyncWithFirebase && (
               <button
-                onClick={onSyncTxtWorkoutsFolder}
-                disabled={isSyncingDriveTxt}
+                onClick={onSyncWithFirebase}
+                disabled={isSyncingFirebase}
                 className="min-h-[42px] px-2.5 sm:px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors min-w-0 truncate"
                 title="Synchronizuj treningi z bazą Firebase Firestore i pamięcią OPFS"
               >
                 <FolderSync
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    isSyncingDriveTxt ? 'animate-spin' : ''
+                    isSyncingFirebase ? 'animate-spin' : ''
                   }`}
                 />
                 <span className="truncate">Sync Firebase</span>

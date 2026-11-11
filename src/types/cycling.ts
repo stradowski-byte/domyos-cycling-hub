@@ -163,10 +163,6 @@ export interface CompletedActivity {
   /** Firebase Cloud Firestore sync status */
   pendingFirebaseSync?: boolean;
   syncedToFirebase?: boolean;
-  /** Legacy compatibility alias */
-  pendingDriveSync?: boolean;
-  syncedToGoogleDrive: boolean;
-  googleDriveFileId?: string;
   /** Intervals.icu sync status */
   syncedToIntervals: boolean;
   intervalsActivityId?: string;

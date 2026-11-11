@@ -512,12 +512,12 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                             Firebase:{' '}
                             <strong
                               className={
-                                act.syncedToFirebase || act.syncedToGoogleDrive
+                                act.syncedToFirebase
                                   ? 'text-emerald-400'
                                   : 'text-amber-400'
                               }
                             >
-                              {act.syncedToFirebase || act.syncedToGoogleDrive
+                              {act.syncedToFirebase
                                 ? 'Zapisano (.FIT)'
                                 : 'Pending'}
                             </strong>

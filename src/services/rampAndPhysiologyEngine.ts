@@ -50,8 +50,6 @@ export const PROFILE_AVATAR_COLORS = [
   '#06B6D4',
 ];
 
-export const DEFAULT_PROFILES: Record<ProfileId, AthleteProfile> = {};
-
 export function createFallbackRuntimeProfile(): AthleteProfile {
   return {
     id: 'google_rider',
@@ -1190,19 +1188,20 @@ export function calculateActivitySummary(
   const totalDistanceMeters =
     records.length > 0 ? Math.round(records[records.length - 1].distanceMeters) : 0;
 
-  // Normalized Power (30s rolling average raised to 4th power)
+  // Normalized Power (O(N) 30s sliding window average raised to 4th power)
   let sumFourthPower = 0;
   let rollingCount = 0;
+  let runningWinSum = 0;
   const windowSize = Math.min(30, records.length);
   for (let i = 0; i < records.length; i++) {
-    const startIdx = Math.max(0, i - windowSize + 1);
-    let winSum = 0;
-    const count = i - startIdx + 1;
-    for (let j = startIdx; j <= i; j++) {
-      winSum += records[j].powerWatts;
+    runningWinSum += records[i].powerWatts;
+    if (i >= windowSize) {
+      runningWinSum -= records[i - windowSize].powerWatts;
     }
-    const rollingAvg = winSum / count;
-    sumFourthPower += Math.pow(rollingAvg, 4);
+    const count = Math.min(i + 1, windowSize);
+    const rollingAvg = runningWinSum / count;
+    const sq = rollingAvg * rollingAvg;
+    sumFourthPower += sq * sq;
     rollingCount++;
   }
 
@@ -1242,7 +1241,7 @@ export function calculateActivitySummary(
     timeInPowerZonesSec,
     timeInHrZonesSec,
     records,
-    syncedToGoogleDrive: false,
+    syncedToFirebase: false,
     syncedToIntervals: false,
   };
 
@@ -1337,10 +1336,13 @@ export function computeRidePeakPowerAndHr(
     }));
   }
 
-  const recs = activity.records || [];
-  if (recs.length === 0 && activity.peakPowerWindows && activity.peakPowerWindows.length === PEAK_POWER_WINDOWS.length) {
+  if (
+    activity.peakPowerWindows &&
+    activity.peakPowerWindows.length === PEAK_POWER_WINDOWS.length
+  ) {
     return activity.peakPowerWindows;
   }
+  const recs = activity.records || [];
   // Expand or normalize records to a 1-second timeline if needed
   let timelinePower: number[] = [];
   let timelineHr: number[] = [];

@@ -391,11 +391,34 @@ export function encodeActivityToFitBlob(activity: CompletedActivity): Blob {
   return new Blob([bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' });
 }
 
+/**
+ * Builds a deterministic, filesystem-safe .FIT filename for OPFS storage and browser downloads.
+ * By default returns `${YYYY-MM-DD}_${cleanWorkoutName}.fit` (used in OPFS `/Workouts_FIT`).
+ */
+export function buildCleanActivityFitFileName(
+  activity: Pick<CompletedActivity, 'startedAtIso' | 'workoutName' | 'profileId'>,
+  options?: { includeProfilePrefix?: boolean; extension?: 'fit' | 'tcx' }
+): string {
+  const ext = options?.extension || 'fit';
+  const datePart = (activity.startedAtIso || '').slice(0, 10) || 'ride';
+  const cleanName =
+    (activity.workoutName || 'workout')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 32) || 'workout';
+  if (options?.includeProfilePrefix) {
+    return `Domyos_${activity.profileId}_${datePart}_${cleanName}.${ext}`;
+  }
+  return `${datePart}_${cleanName}.${ext}`;
+}
+
 export function downloadActivityFitFile(activity: CompletedActivity): void {
   const blob = encodeActivityToFitBlob(activity);
-  const datePart = activity.startedAtIso.slice(0, 10);
-  const cleanName = activity.workoutName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
-  const filename = `Domyos_${activity.profileId}_${datePart}_${cleanName}.fit`;
+  const filename = buildCleanActivityFitFileName(activity, {
+    includeProfilePrefix: true,
+    extension: 'fit',
+  });
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -474,9 +497,10 @@ ${lapsXml}
 </TrainingCenterDatabase>`;
 
   const blob = new Blob([xml], { type: 'application/vnd.garmin.tcx+xml' });
-  const datePart = activity.startedAtIso.slice(0, 10);
-  const cleanName = activity.workoutName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
-  const filename = `Domyos_${activity.profileId}_${datePart}_${cleanName}.tcx`;
+  const filename = buildCleanActivityFitFileName(activity, {
+    includeProfilePrefix: true,
+    extension: 'tcx',
+  });
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
