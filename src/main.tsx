@@ -19,7 +19,7 @@ try {
           '/DomyosCyclingHub/User_Data/default/Workouts_FIT',
         ],
         cloudConnected: false,
-        installedEngineVersion: '2.1.0',
+        installedEngineVersion: '2.2.0',
       })
     );
   }
@@ -29,6 +29,20 @@ try {
 
 // Register Service Worker & automatically reload when a new build is deployed via GitHub Actions
 if ('serviceWorker' in navigator) {
+  // Immediately purge any legacy v2.1.0 cache that may have cached dev /src/ modules
+  if ('caches' in window) {
+    caches
+      .keys()
+      .then((keys) => {
+        keys.forEach((key) => {
+          if (key !== 'domyos-cycling-hub-v2.2.0') {
+            caches.delete(key).catch(() => {});
+          }
+        });
+      })
+      .catch(() => {});
+  }
+
   window.addEventListener('load', () => {
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {

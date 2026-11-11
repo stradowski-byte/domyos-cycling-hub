@@ -1,23 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
-  HelpCircle,
-  Bluetooth,
-  Lock,
-  Heart,
-  Terminal,
-  Volume2,
-  Maximize2,
-  Gauge,
-  Clock,
-  Activity,
-  Sliders,
-  Layers,
-  Play,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface CockpitHelpGuideModalProps {
@@ -25,307 +11,531 @@ interface CockpitHelpGuideModalProps {
   onClose: () => void;
 }
 
+type AccentTheme = 'emerald' | 'sky' | 'amber';
+
+interface TourCalloutItem {
+  markerNumber: number;
+  selector: string;
+  accent: AccentTheme;
+  title: string;
+  shortNote: string;
+}
+
+interface TourPage {
+  pageNumber: number;
+  pageTitle: string;
+  items: TourCalloutItem[];
+}
+
+const COCKPIT_TOUR_PAGES: TourPage[] = [
+  {
+    pageNumber: 1,
+    pageTitle: 'Strona 1 z 5 · Górny Pasek: Bluetooth, Czujniki i Widok',
+    items: [
+      {
+        markerNumber: 1,
+        selector: '[data-tour-target="p1-bike"]',
+        accent: 'emerald',
+        title: '1. Połącz Rower (FTMS + Blokada 🔒)',
+        shortNote:
+          'Paruje rower Domyos BLE. Po starcie jazdy przycisk blokuje się kłódką 🔒, a przy utracie sygnału sam włącza Auto-Pauzę.',
+      },
+      {
+        markerNumber: 2,
+        selector: '[data-tour-target="p1-hr-sniffer"]',
+        accent: 'sky',
+        title: '2. + Pas HR oraz Sniffer BLE',
+        shortNote:
+          'Łączy zewnętrzny pas tętna (0x180D) bezpośrednio z telefonem oraz otwiera skaner ramek HEX i dekoder HR na żywo.',
+      },
+      {
+        markerNumber: 3,
+        selector: '[data-tour-target="p1-audio-zen"]',
+        accent: 'amber',
+        title: '3. Głośnik (3-2-1) oraz Zen HUD',
+        shortNote:
+          'Włącza odliczanie dźwiękowe przed końcem odcinka oraz tryb pełnoekranowy Zen HUD (ukrywa paski nawigacji).',
+      },
+    ],
+  },
+  {
+    pageNumber: 2,
+    pageTitle: 'Strona 2 z 5 · Górne Kafelki: Moc i Zegar Interwału',
+    items: [
+      {
+        markerNumber: 1,
+        selector: '[data-tour-target="p2-power"]',
+        accent: 'emerald',
+        title: '1. Kafelek MOC (3S / 1S)',
+        shortNote:
+          'Pokazuje waty, strefę Z1–Z7 oraz różnicę do celu (CEL W). Stuknij w kafelek, aby przełączyć wygładzanie 3-sekundowe (3S) lub chwilowe (1S).',
+      },
+      {
+        markerNumber: 2,
+        selector: '[data-tour-target="p2-interval"]',
+        accent: 'amber',
+        title: '2. Kafelek INTERWAŁ (Odliczanie)',
+        shortNote:
+          'Odlicza czas bieżącego odcinka w dół do 00:00, pokazując numer bloku oraz docelowe waty na końcu rampy.',
+      },
+    ],
+  },
+  {
+    pageNumber: 3,
+    pageTitle: 'Strona 3 z 5 · Środkowe Kafelki: Tętno (Pa:Hr %) i Kadencja',
+    items: [
+      {
+        markerNumber: 1,
+        selector: '[data-tour-target="p3-hr"]',
+        accent: 'emerald',
+        title: '1. Kafelek TĘTNO (BPM + Dryf Pa:Hr %)',
+        shortNote:
+          'Monitoruje puls, źródło HR i żywy Dryf Tętna (Pa:Hr % — poniżej 5% oznacza stabilny tlen). Stuknij, aby otworzyć Sniffer BLE.',
+      },
+      {
+        markerNumber: 2,
+        selector: '[data-tour-target="p3-cadence"]',
+        accent: 'sky',
+        title: '2. Kafelek KADENCJA (Alert RPM)',
+        shortNote:
+          'Pokazuje rytm pedałowania RPM i cel odcinka. Gdy spadniesz o ponad 5 RPM poniżej celu, cały kafelek zaświeci na czerwono!',
+      },
+    ],
+  },
+  {
+    pageNumber: 4,
+    pageTitle: 'Strona 4 z 5 · Dolne Kafelki: Dystans 700c i Sterowanie ERG',
+    items: [
+      {
+        markerNumber: 1,
+        selector: '[data-tour-target="p4-time-dist"]',
+        accent: 'emerald',
+        title: '1. Kafelek CZAS JAZDY i Dystans 700c',
+        shortNote:
+          'Zlicza łączny czas treningu oraz realną prędkość (km/h) i dystans wyliczany z obrotów koła szosowego 700x25c (2.105 m).',
+      },
+      {
+        markerNumber: 2,
+        selector: '[data-tour-target="p4-erg-mode"]',
+        accent: 'amber',
+        title: '2. Kafelek TRYB (AUTO ERG / OPÓR 1–32)',
+        shortNote:
+          'Przełącza między automatycznym pilnowaniem watów a ręcznymi biegami 1–32. Przyciskami -5% / +5% szybko skorygujesz trudność.',
+      },
+    ],
+  },
+  {
+    pageNumber: 5,
+    pageTitle: 'Strona 5 z 5 · 3 Bloczki, Wykres i Pasek START / ZAKOŃCZ',
+    items: [
+      {
+        markerNumber: 1,
+        selector: '[data-tour-target="p5-preview-blocks"]',
+        accent: 'emerald',
+        title: '1. Podgląd 3 Odcinków (Teraz / +1 / +2)',
+        shortNote:
+          'Pokazuje czas i waty (stałe lub rampę Start W → Koniec W) obecnego i 2 kolejnych bloków. Stuknij, aby przeskoczyć.',
+      },
+      {
+        markerNumber: 2,
+        selector: '[data-tour-target="p5-chart"]',
+        accent: 'sky',
+        title: '2. Wykres Osi Czasu (▼ ODCINEK)',
+        shortNote:
+          'Wizualny profil całego treningu ze strefami mocy Z1–Z7 i zielonym znacznikiem postępu ▼.',
+      },
+      {
+        markerNumber: 3,
+        selector: '[data-tour-target="p5-transport"]',
+        accent: 'amber',
+        title: '3. Pasek START / PAUZA, +30s i ZAKOŃCZ',
+        shortNote:
+          '+30s wydłuża bieżący blok o pół minuty, a ZAKOŃCZ otwiera podsumowanie z wyborem Odczuć 1–10 i zapisem pliku .FIT.',
+      },
+    ],
+  },
+];
+
+interface TargetRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  bottom: number;
+  centerX: number;
+}
+
+interface BubbleHorizontalBounds {
+  left: number;
+  width: number;
+}
+
+const ACCENT_STYLES: Record<
+  AccentTheme,
+  {
+    spotlightBorder: string;
+    spotlightBg: string;
+    badgeBg: string;
+    cardBorder: string;
+    triangleText: string;
+    titleColor: string;
+  }
+> = {
+  emerald: {
+    spotlightBorder: 'border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.45)]',
+    spotlightBg: 'bg-emerald-500/10',
+    badgeBg: 'bg-emerald-400 text-slate-950',
+    cardBorder: 'border-emerald-400',
+    triangleText: 'text-emerald-400',
+    titleColor: 'text-emerald-300',
+  },
+  sky: {
+    spotlightBorder: 'border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.45)]',
+    spotlightBg: 'bg-sky-500/10',
+    badgeBg: 'bg-sky-400 text-slate-950',
+    cardBorder: 'border-sky-400',
+    triangleText: 'text-sky-400',
+    titleColor: 'text-sky-300',
+  },
+  amber: {
+    spotlightBorder: 'border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.45)]',
+    spotlightBg: 'bg-amber-500/10',
+    badgeBg: 'bg-amber-400 text-slate-950',
+    cardBorder: 'border-amber-400',
+    triangleText: 'text-amber-400',
+    titleColor: 'text-amber-300',
+  },
+};
+
 export const CockpitHelpGuideModal: React.FC<CockpitHelpGuideModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [page, setPage] = useState<1 | 2 | 3>(1);
+  const [pageIdx, setPageIdx] = useState(0);
+  const [targetRects, setTargetRects] = useState<Record<string, TargetRect>>({});
+  const [bubbleBounds, setBubbleBounds] = useState<
+    Record<string, BubbleHorizontalBounds>
+  >({});
+  const bubbleRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const currentPage = COCKPIT_TOUR_PAGES[pageIdx] || COCKPIT_TOUR_PAGES[0];
+
+  useEffect(() => {
+    if (isOpen) {
+      setPageIdx(0);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const measureAll = () => {
+      const nextRects: Record<string, TargetRect> = {};
+
+      for (const item of currentPage.items) {
+        const nodes = Array.from(
+          document.querySelectorAll(item.selector)
+        ) as HTMLElement[];
+
+        let minTop = Infinity;
+        let minLeft = Infinity;
+        let maxRight = -Infinity;
+        let maxBottom = -Infinity;
+
+        for (const el of nodes) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (r.top < minTop) minTop = r.top;
+          if (r.left < minLeft) minLeft = r.left;
+          if (r.right > maxRight) maxRight = r.right;
+          if (r.bottom > maxBottom) maxBottom = r.bottom;
+        }
+
+        if (minTop !== Infinity) {
+          const pad = 4;
+          const top = Math.max(2, minTop - pad);
+          const left = Math.max(2, minLeft - pad);
+          const right = Math.min(window.innerWidth - 2, maxRight + pad);
+          const bottom = Math.min(window.innerHeight - 2, maxBottom + pad);
+
+          nextRects[item.selector] = {
+            top,
+            left,
+            width: Math.max(30, right - left),
+            height: Math.max(26, bottom - top),
+            bottom,
+            centerX: left + (right - left) / 2,
+          };
+        }
+      }
+
+      setTargetRects(nextRects);
+
+      // Measure rendered callout bubbles so each triangular beak aligns horizontally with its target centerX
+      window.requestAnimationFrame(() => {
+        const nextBubbles: Record<string, BubbleHorizontalBounds> = {};
+        for (const item of currentPage.items) {
+          const bEl = bubbleRefs.current[item.selector];
+          if (bEl) {
+            const br = bEl.getBoundingClientRect();
+            nextBubbles[item.selector] = {
+              left: br.left,
+              width: Math.max(120, br.width),
+            };
+          }
+        }
+        setBubbleBounds(nextBubbles);
+      });
+    };
+
+    measureAll();
+    window.addEventListener('resize', measureAll);
+    window.addEventListener('scroll', measureAll, true);
+    return () => {
+      window.removeEventListener('resize', measureAll);
+      window.removeEventListener('scroll', measureAll, true);
+    };
+  }, [isOpen, pageIdx, currentPage]);
 
   if (!isOpen) return null;
 
+  const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const activeRectList = currentPage.items
+    .map((item) => targetRects[item.selector])
+    .filter((r): r is TargetRect => Boolean(r));
+
+  const groupMinTop =
+    activeRectList.length > 0
+      ? Math.min(...activeRectList.map((r) => r.top))
+      : 100;
+  const groupMaxBottom =
+    activeRectList.length > 0
+      ? Math.max(...activeRectList.map((r) => r.bottom))
+      : 220;
+
+  // Decide whether the callout cards sit BELOW the highlighted tools (with upward ▲ beak)
+  // or ABOVE the highlighted tools (with downward ▼ beak)
+  const spaceBelow = viewportH - groupMaxBottom;
+  const spaceAbove = groupMinTop;
+  const placeCalloutsBelow = spaceBelow >= spaceAbove;
+
+  // Keep the navigation bar out of the way of the highlighted tools (bottom on pages 1-3, top on pages 4-5)
+  const navBarAtTop = !placeCalloutsBelow;
+
+  const handleAdvanceOrClose = () => {
+    if (pageIdx + 1 < COCKPIT_TOUR_PAGES.length) {
+      setPageIdx((prev) => prev + 1);
+    } else {
+      onClose();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 select-none">
-      <div className="w-full max-w-2xl rounded-3xl bg-[#131B26] border border-emerald-500/50 p-4 sm:p-6 space-y-4 shadow-2xl max-h-[92vh] flex flex-col justify-between overflow-hidden">
-        {/* TOP HEADER & PAGE TABS */}
-        <div className="space-y-3 shrink-0">
-          <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-                <HelpCircle className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-sm sm:text-base font-bold text-white truncate">
-                  Przewodnik po Kokpicie Treningowym (Strona {page} z 3)
-                </h2>
-                <p className="text-[11px] text-slate-400 truncate">
-                  Objaśnienie wszystkich przycisków, kafelków i wskaźników widoku Kokpitu
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white shrink-0"
-              title="Zamknij przewodnik"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+    <div
+      onClick={handleAdvanceOrClose}
+      className="fixed inset-0 z-50 bg-slate-950/65 select-none overflow-hidden cursor-pointer"
+      title="Stuknij w dowolne miejsce na ekranie, aby przejść do następnej strony"
+    >
+      {/* 1. HIGHLIGHT FRAMES + NUMBER BADGES AROUND EACH OF THE 2-3 ACTIVE TOOLS ON THIS PAGE */}
+      {currentPage.items.map((item) => {
+        const rect = targetRects[item.selector];
+        if (!rect) return null;
+        const styleTheme = ACCENT_STYLES[item.accent];
 
-          {/* 3-PAGE SEGMENTED SELECTOR */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#0B0F17] border border-slate-800">
-            <button
-              type="button"
-              onClick={() => setPage(1)}
-              className={`min-h-[38px] px-2 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-colors truncate ${
-                page === 1
-                  ? 'bg-emerald-500 text-slate-950'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              1. Górny Pasek i BLE
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage(2)}
-              className={`min-h-[38px] px-2 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-colors truncate ${
-                page === 2
-                  ? 'bg-emerald-500 text-slate-950'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              2. 6 Kafelków Danych
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage(3)}
-              className={`min-h-[38px] px-2 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-colors truncate ${
-                page === 3
-                  ? 'bg-emerald-500 text-slate-950'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              3. Interwały i Sterowanie
-            </button>
-          </div>
-        </div>
-
-        {/* SCROLLABLE BODY CONTENT FOR CURRENT PAGE */}
-        <div className="overflow-y-auto pr-1 space-y-2.5 flex-1 min-h-0">
-          {page === 1 && (
-            <div className="space-y-2.5 text-xs">
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-                  <Bluetooth className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Połącz Rower (FTMS) i Blokada podczas Jazdy 🔒
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Przed treningiem kliknij <strong>Połącz Rower</strong>, aby sparować rower Domyos przez Bluetooth (przesyła moc, kadencję i opór). Gdy klikniesz <strong>START</strong>, przycisk automatycznie <strong>blokuje się ikoną kłódki</strong> (<Lock className="w-3 h-3 inline text-emerald-400" />), abyś nie rozłączył roweru przypadkowym dotknięciem ekranu w trakcie jazdy.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
-                  <AlertTriangle className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Automatyczna Pauza przy Zerwaniu Bluetooth
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Jeśli w trakcie kręcenia rower samoczynnie straci połączenie Bluetooth, aplikacja natychmiast <strong>włącza Pauzę</strong> i otwiera okno ponownego łączenia. Po odzyskaniu łączności zegar czeka w Pauzie, aż ręcznie klikniesz <strong>WZNÓW</strong>.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 mt-0.5">
-                  <Heart className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    + Pas HR (Zewnętrzny Pas Tętna BLE 0x180D)
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Pozwala połączyć pas piersiowy lub opaskę optyczną (Polar, Garmin, Decathlon, Coospo) bezpośrednio z telefonem równolegle z rowerem. Po sparowaniu przycisk również zostaje zablokowany na czas trwania treningu.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
-                  <Terminal className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Sniffer BLE (Podgląd Ramek HEX i Dekoder HR)
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Narzędzie diagnostyczne pokazujące surowe pakiety Bluetooth przychodzące z roweru oraz wykryte bajty tętna w czasie rzeczywistym.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-                  <Maximize2 className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Dźwięki (3-2-1) oraz Tryb Pełnoekranowy Zen HUD
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Ikona głośnika (<Volume2 className="w-3 h-3 inline text-emerald-400" />) włącza sygnały dźwiękowe na 3 sekundy przed końcem każdego interwału. Przycisk <strong>Zen HUD</strong> ukrywa górny i dolny pasek nawigacji aplikacji, zostawiając na ekranie wyłącznie czysty Kokpit.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {page === 2 && (
-            <div className="space-y-2.5 text-xs">
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 space-y-1">
-                <div className="font-bold text-emerald-400 flex items-center gap-1.5">
-                  <Gauge className="w-4 h-4 shrink-0" />
-                  <span>1. Kafelek MOC (3S / 1S) i CEL W</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  Pokazuje Twoją aktualną moc w watach, cel bieżącego odcinka (<strong>CEL W</strong>), różnicę względem celu (np. <code>+4W</code>) oraz kolorową strefę mocy i <code>% FTP</code>. <strong>Stuknij w ten kafelek</strong>, aby przełączyć wygładzanie mocy między średnią 3-sekundową (<code>3S</code>) a odczytem chwilowym (<code>1S</code>).
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 space-y-1">
-                <div className="font-bold text-amber-400 flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 shrink-0" />
-                  <span>2. Kafelek INTERWAŁ (Odliczanie do 00:00)</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  Odlicza czas pozostały do końca aktualnego odcinka (w ostatnich 5 sekundach podświetla się na czerwono). Pokazuje numer bieżącego bloku (np. <code>2/6</code>), jego nazwę oraz docelowe waty końcowe, jeśli jedziesz rampę (<code>→W</code>).
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 space-y-1">
-                <div className="font-bold text-rose-400 flex items-center gap-1.5">
-                  <Heart className="w-4 h-4 shrink-0" />
-                  <span>3. Kafelek TĘTNO (HR) + Dryf Tlenowy (Pa:Hr %)</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  Wyświetla tętno w <code>BPM</code>, <code>% MAX</code> oraz <strong>Dryf Tętna (Pa:Hr %)</strong> i współczynnik efektywności <strong>EF (W/BPM)</strong> porównujący pierwszą i drugą połowę jazdy. Dryf poniżej <code>5%</code> oznacza stabilną bazę tlenową; powyżej <code>5%</code> sygnalizuje odwodnienie lub zmęczenie.
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 space-y-1">
-                <div className="font-bold text-sky-400 flex items-center gap-1.5">
-                  <Activity className="w-4 h-4 shrink-0" />
-                  <span>4. Kafelek KADENCJA (RPM) z Czerwonym Alertem</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  Pokazuje rytm pedałowania (<code>RPM</code>) oraz zadany cel odcinka (<code>CEL RPM</code>). Gdy Twoja kadencja spadnie o ponad 5 RPM poniżej celu, cały kafelek <strong>podświetla się na czerwono (KADENCJA ZA NISKA!)</strong>, przypominając o lżejszym i szybszym obrocie korbą.
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 space-y-1">
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <Sliders className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>5. CZAS / DYSTANS (700c) oraz 6. TRYB (AUTO ERG vs OPÓR)</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  <strong>Kafelek 5</strong> zlicza całkowity czas sesji oraz realny dystans (<code>km</code>) i prędkość (<code>km/h</code>) dla koła szosowego <code>700c (2.105m)</code>. <strong>Kafelek 6 (TRYB)</strong> pozwala jednym stuknięciem przełączyć rower między <strong>AUTO ERG</strong> (rower sam pilnuje watów z planu, a przyciskami <code>-5% / +5%</code> korygujesz trudność) a ręcznym <strong>OPOREM 1–32</strong> (zmiana biegów <code>-1 / +1</code>).
-                </p>
-              </div>
-            </div>
-          )}
-
-          {page === 3 && (
-            <div className="space-y-2.5 text-xs">
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-                  <Layers className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    3 Bloczki Interwałów nad Wykresem (1. Teraz, 2. Następny, 3. Kolejny)
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Bezpośrednio nad wykresem widzisz 3 karty pokazujące aktualny odcinek oraz dwa kolejne. Dla odcinków o stałej mocy wyświetlają pojedynczą wartość (np. <code>165 W</code>), a dla ramp dokładny zakres przejścia (np. <code>120W → 200W</code>). <strong>Stuknij w dowolny bloczek</strong>, aby od razu do niego przeskoczyć.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
-                  <Activity className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Wykres Profilu Treningu ze Strzałką Pozycji (▼)
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Kolorowe bloki na wykresie oznaczają strefy mocy (od szarej Z1 i niebieskiej Z2 po czerwoną VO2max), przerywana linia to Twoje FTP, a zielona strzałka <strong>▼</strong> wskazuje dokładne miejsce, w którym jedziesz. Kliknięcie dowolnego słupka na wykresie przenosi Cię do tego odcinka.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
-                  <Play className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Dolny Pasek Transportu i Przycisk +30s
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Na samym dole znajdują się duże przyciski pod kciuk: cofanie/przeskakiwanie odcinka (<code>⏮ / ⏭</code>), główny przycisk <strong>START / PAUZA / WZNÓW</strong>, przycisk <strong>+30s</strong> (natychmiast wydłuża aktualny interwał lub rozgrzewkę o 30 sekund) oraz przycisk <strong>ZAKOŃCZ</strong>.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div className="space-y-1">
-                  <div className="font-bold text-white">
-                    Zunifikowany Panel Zakończenia i Odczuć (1–10)
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Zarówno gdy ostatni interwał dojdzie do <code>00:00</code>, jak i gdy klikniesz ręcznie <strong>ZAKOŃCZ</strong>, otwiera się ten sam panel podsumowania. Wybierasz w nim swoje samopoczucie w skali <strong>1–10</strong> oraz szybkie tagi (np. <em>Ciężkie nogi</em>, <em>Lekka noga / Flow</em>) i klikasz <strong>Zakończ, zapisz .FIT i Odczucia</strong> (lub wracasz do jazdy).
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* BOTTOM PAGINATION CONTROLS */}
-        <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-800 shrink-0">
-          <button
-            type="button"
-            onClick={() => setPage((p) => (p > 1 ? ((p - 1) as 1 | 2 | 3) : p))}
-            disabled={page === 1}
-            className="min-h-[42px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition-colors"
+        return (
+          <div
+            key={item.selector}
+            style={{
+              position: 'fixed',
+              top: `${rect.top}px`,
+              left: `${rect.left}px`,
+              width: `${rect.width}px`,
+              height: `${rect.height}px`,
+            }}
+            className={`rounded-xl border-2 ${styleTheme.spotlightBorder} ${styleTheme.spotlightBg} pointer-events-none transition-all duration-200 z-10`}
           >
-            <ChevronLeft className="w-4 h-4 shrink-0" />
-            <span>Poprzednia</span>
-          </button>
+            <span
+              className={`absolute -top-2.5 -left-1.5 w-5 h-5 rounded-full ${styleTheme.badgeBg} font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shadow-md`}
+            >
+              {item.markerNumber}
+            </span>
+          </div>
+        );
+      })}
 
-          <span className="font-mono-tabular text-xs font-bold text-slate-400">
-            Strona {page} z 3
+      {/* 2. 2-3 CALLOUT BUBBLES WITH SIMPLE TRIANGULAR BEAKS (▲ / ▼) POINTING AT THEIR TARGETS */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={
+          placeCalloutsBelow
+            ? {
+                position: 'fixed',
+                top: `${Math.min(viewportH - 250, groupMaxBottom + 14)}px`,
+                left: '50%',
+                transform: 'translateX(-50%)',
+              }
+            : {
+                position: 'fixed',
+                bottom: `${Math.max(12, viewportH - groupMinTop + 14)}px`,
+                left: '50%',
+                transform: 'translateX(-50%)',
+              }
+        }
+        className={`w-[calc(100vw-20px)] max-w-4xl grid gap-2.5 cursor-default z-20 ${
+          currentPage.items.length === 2
+            ? 'grid-cols-1 sm:grid-cols-2'
+            : 'grid-cols-1 md:grid-cols-3'
+        }`}
+      >
+        {currentPage.items.map((item) => {
+          const rect = targetRects[item.selector];
+          const bBounds = bubbleBounds[item.selector];
+          const styleTheme = ACCENT_STYLES[item.accent];
+
+          // Compute exact horizontal X offset for the triangular beak on the card edge
+          // so it points toward the center of its corresponding tool
+          const beakLeftPx =
+            rect && bBounds
+              ? Math.max(
+                  20,
+                  Math.min(bBounds.width - 20, rect.centerX - bBounds.left)
+                )
+              : null;
+
+          return (
+            <div
+              key={item.selector}
+              ref={(el) => {
+                bubbleRefs.current[item.selector] = el;
+              }}
+              className={`relative rounded-2xl bg-[#131B26]/95 border-2 ${styleTheme.cardBorder} px-3.5 py-2.5 shadow-[0_14px_35px_rgba(0,0,0,0.85)] space-y-1`}
+            >
+              {/* UPWARD TRIANGULAR BEAK (▲) AT TOP BORDER WHEN BUBBLE IS BELOW THE TOOL */}
+              {placeCalloutsBelow && (
+                <div
+                  style={{
+                    left: beakLeftPx !== null ? `${beakLeftPx}px` : '50%',
+                  }}
+                  className="absolute -top-[11px] -translate-x-1/2 pointer-events-none"
+                >
+                  <svg
+                    width="22"
+                    height="11"
+                    viewBox="0 0 22 11"
+                    className={`${styleTheme.triangleText} fill-current`}
+                  >
+                    <path d="M11 0L22 11H0L11 0Z" />
+                  </svg>
+                </div>
+              )}
+
+              {/* DOWNWARD TRIANGULAR BEAK (▼) AT BOTTOM BORDER WHEN BUBBLE IS ABOVE THE TOOL */}
+              {!placeCalloutsBelow && (
+                <div
+                  style={{
+                    left: beakLeftPx !== null ? `${beakLeftPx}px` : '50%',
+                  }}
+                  className="absolute -bottom-[11px] -translate-x-1/2 pointer-events-none"
+                >
+                  <svg
+                    width="22"
+                    height="11"
+                    viewBox="0 0 22 11"
+                    className={`${styleTheme.triangleText} fill-current`}
+                  >
+                    <path d="M11 11L0 0H22L11 11Z" />
+                  </svg>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-5 h-5 rounded-full ${styleTheme.badgeBg} font-mono-tabular text-[11px] font-extrabold flex items-center justify-center shrink-0`}
+                >
+                  {item.markerNumber}
+                </span>
+                <h4
+                  className={`text-xs sm:text-sm font-extrabold ${styleTheme.titleColor} leading-tight`}
+                >
+                  {item.title}
+                </h4>
+              </div>
+
+              <p className="text-[11px] sm:text-xs text-slate-100 leading-relaxed pl-7">
+                {item.shortNote}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 3. COMPACT NAVIGATION BAR (WSTECZ / KROPKI 1..5 / DALEJ / ZAMKNIJ) */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`fixed left-1/2 -translate-x-1/2 w-[calc(100vw-20px)] max-w-xl rounded-2xl bg-[#0B0F17]/95 border border-slate-700 px-3.5 py-2.5 shadow-2xl flex flex-col gap-1.5 cursor-default z-30 ${
+          navBarAtTop ? 'top-3' : 'bottom-3'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] sm:text-xs font-extrabold text-emerald-400 truncate">
+            {currentPage.pageTitle}
           </span>
 
-          {page < 3 ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[30px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 shrink-0 transition-colors"
+          >
+            <span>Zamknij</span>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setPageIdx((prev) => Math.max(0, prev - 1))}
+            disabled={pageIdx === 0}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 flex items-center gap-1 transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4 shrink-0" />
+            <span>Wstecz</span>
+          </button>
+
+          {/* Page Dots (1..5) */}
+          <div className="flex items-center gap-1.5">
+            {COCKPIT_TOUR_PAGES.map((p, idx) => (
+              <button
+                key={p.pageNumber}
+                type="button"
+                onClick={() => setPageIdx(idx)}
+                className={`h-2.5 rounded-full transition-all ${
+                  idx === pageIdx
+                    ? 'w-6 bg-emerald-400'
+                    : 'w-2.5 bg-slate-700 hover:bg-slate-500'
+                }`}
+                title={`Przejdź do strony ${p.pageNumber}`}
+              />
+            ))}
+          </div>
+
+          {pageIdx + 1 < COCKPIT_TOUR_PAGES.length ? (
             <button
               type="button"
-              onClick={() =>
-                setPage((p) => (p < 3 ? ((p + 1) as 1 | 2 | 3) : p))
-              }
-              className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1.5 transition-colors"
+              onClick={() => setPageIdx((prev) => prev + 1)}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1 transition-colors"
             >
-              <span>Następna</span>
+              <span>Dalej ({pageIdx + 1}/5)</span>
               <ChevronRight className="w-4 h-4 shrink-0" />
             </button>
           ) : (
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1.5 transition-colors"
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 flex items-center gap-1.5 transition-colors"
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Rozumiem, wracam do Kokpitu</span>
+              <span>Gotowe!</span>
             </button>
           )}
         </div>

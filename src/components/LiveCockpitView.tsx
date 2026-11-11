@@ -488,6 +488,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           <button
+            data-tour-target="p1-bike"
             onClick={handleBikeBleButtonClick}
             className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg border text-[11px] sm:text-xs font-bold flex items-center gap-1 sm:gap-1.5 transition-colors whitespace-nowrap ${
               telemetry.reconnecting
@@ -529,6 +530,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
           {onConnectExternalHrStrap && (
             <button
+              data-tour-target="p1-hr-sniffer"
               onClick={handleHrStrapButtonClick}
               className={`min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition-colors whitespace-nowrap ${
                 telemetry.externalHrConnected
@@ -553,6 +555,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           )}
 
           <button
+            data-tour-target="p1-hr-sniffer"
             onClick={() => setIsSnifferModalOpen(true)}
             className="min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center gap-1 whitespace-nowrap"
             title="Otwórz Skaner Ramek BLE (HEX Sniffer) i Dekoder Tętna HR na żywo"
@@ -564,13 +567,14 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           <button
             onClick={() => setIsHelpGuideOpen(true)}
             className="min-h-[34px] px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1 transition-colors"
-            title="Pomoc i przewodnik po elementach Kokpitu (3 strony)"
+            title="Przezroczysty przewodnik po narzędziach Kokpitu (5 stron ze strzałkami)"
           >
             <HelpCircle className="w-3.5 h-3.5 shrink-0" />
             <span>?</span>
           </button>
 
           <button
+            data-tour-target="p1-audio-zen"
             onClick={onToggleSound}
             className="min-h-[34px] px-2 py-1 rounded-lg bg-[#0B0F17] border border-slate-700 text-slate-300 hover:text-white text-[11px] flex items-center"
             title="Dźwięki odliczania końca interwału 3-2-1"
@@ -584,6 +588,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
           {isFocusHudMode && (
             <button
+              data-tour-target="p1-audio-zen"
               onClick={() => void forceUpdatePwaAndClearCaches()}
               className="min-h-[34px] px-2 py-1 rounded-lg bg-[#0B0F17] hover:bg-slate-800 border border-slate-700 text-emerald-400 text-[11px] font-bold flex items-center gap-1"
               title="Wymuś odświeżenie PWA (wyczyść cache Service Workera)"
@@ -595,6 +600,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
           {onToggleFocusHudMode && (
             <button
+              data-tour-target="p1-audio-zen"
               onClick={onToggleFocusHudMode}
               className={`min-h-[34px] px-2 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition-colors ${
                 isFocusHudMode
@@ -650,6 +656,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 flex-1 min-h-0">
         {/* FIELD 1: POWER (WATTS) + TARGET WATTS + ERG GAUGE */}
         <div
+          data-tour-target="p2-power"
           onClick={onToggle3sSmoothing}
           style={{
             borderColor:
@@ -728,7 +735,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
         </div>
 
         {/* FIELD 2: INTERVAL TIMER (DECREASING COUNTDOWN) */}
-        <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden">
+        <div
+          data-tour-target="p2-interval"
+          className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden"
+        >
           <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider text-amber-400 uppercase min-w-0">
             <span className="truncate">INTERWAŁ</span>
             <span className="font-mono-tabular text-slate-300 shrink-0">
@@ -762,6 +772,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
         {/* FIELD 3: HEART RATE (BPM) + LIVE AEROBIC DECOUPLING (Pa:Hr %) + BLE SNIFFER TRIGGER */}
         <div
+          data-tour-target="p3-hr"
           onClick={() => setIsSnifferModalOpen(true)}
           className="rounded-xl bg-[#131B26] border border-slate-800 hover:border-rose-500/40 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden cursor-pointer transition-colors"
           title="Stuknij, aby otworzyć Skaner Ramek BLE (HEX Sniffer) lub sparować pas tętna 0x180D"
@@ -840,6 +851,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
         {/* FIELD 4: CADENCE (RPM) + TARGET CADENCE GAUGE (RED ALERT WHEN TOO LOW) */}
         <div
+          data-tour-target="p3-cadence"
           className={`rounded-xl px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden transition-colors border ${
             cadenceDelta < -5
               ? 'bg-rose-950/25 border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.18)]'
@@ -929,7 +941,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
         </div>
 
         {/* FIELD 5: TOTAL WORKOUT TIME + 700c SPEED & DISTANCE */}
-        <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden">
+        <div
+          data-tour-target="p4-time-dist"
+          className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden"
+        >
           <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase min-w-0">
             <span className="truncate">CZAS JAZDY</span>
             <span className="font-mono-tabular text-slate-400 shrink-0">
@@ -963,7 +978,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
         </div>
 
         {/* FIELD 6: INSTANT ERG / RESISTANCE CONTROL CELL */}
-        <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden">
+        <div
+          data-tour-target="p4-erg-mode"
+          className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1.5 flex flex-col justify-between min-w-0 overflow-hidden"
+        >
           <div className="flex items-center justify-between gap-1 min-w-0">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase truncate">
               TRYB
@@ -1039,7 +1057,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
       </div>
 
       {/* 3. THREE INTERVAL PREVIEW BLOCKS (CURRENT + NEXT 2 INTERVALS) DIRECTLY ABOVE WORKOUT TIMELINE */}
-      <div className="grid grid-cols-3 gap-1.5 shrink-0">
+      <div
+        data-tour-target="p5-preview-blocks"
+        className="grid grid-cols-3 gap-1.5 shrink-0"
+      >
         {[
           {
             slotTitle: '1. TERAZ (AKTUALNY)',
@@ -1138,7 +1159,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
       </div>
 
       {/* 4. WORKOUT TIMELINE WITH PROMINENT POSITION ARROW (▼) */}
-      <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1 sm:py-1.5 space-y-1 shrink-0 min-w-0 overflow-hidden">
+      <div
+        data-tour-target="p5-chart"
+        className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3 py-1 sm:py-1.5 space-y-1 shrink-0 min-w-0 overflow-hidden"
+      >
         <div className="flex items-center justify-between gap-2 text-[10px] sm:text-[11px] min-w-0">
           <div className="flex items-center gap-1.5 text-slate-300 font-semibold truncate min-w-0">
             <span className="text-emerald-400 shrink-0">▼ ODCINEK:</span>
@@ -1165,7 +1189,10 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
       </div>
 
       {/* 5. SINGLE-ROW BOTTOM RIDE TRANSPORT BAR (+30S INTERVAL EXTEND) */}
-      <div className="grid grid-cols-12 gap-1.5 shrink-0">
+      <div
+        data-tour-target="p5-transport"
+        className="grid grid-cols-12 gap-1.5 shrink-0"
+      >
         <button
           onClick={onPrevBlock}
           disabled={safeBlockIndex === 0}

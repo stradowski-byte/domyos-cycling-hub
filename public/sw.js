@@ -1,4 +1,4 @@
-const CACHE_NAME = 'domyos-cycling-hub-v2.1.0';
+const CACHE_NAME = 'domyos-cycling-hub-v2.2.0';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -43,14 +43,19 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // Never intercept external API calls (Firebase, Google Fit, Intervals.icu, Google OAuth)
+  // Never intercept external API calls or Vite dev-server module requests (/src/, /node_modules/, /@vite/)
   if (
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('intervals.icu') ||
     url.hostname.includes('firebase') ||
     url.hostname.includes('firestore') ||
     url.hostname.includes('gstatic.com') ||
-    url.pathname.startsWith('/api/')
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.endsWith('.tsx') ||
+    url.pathname.endsWith('.ts')
   ) {
     return;
   }
@@ -85,19 +90,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static JS/CSS/font assets: Stale-while-revalidate for fast startup + background refresh
+  // Built assets & icons: Network-first with offline cache fallback to prevent mixed bundle versions
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return networkResponse;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    (async () => {
+      try {
+        const networkResponse = await fetch(event.request);
+        if (networkResponse && networkResponse.status === 200) {
+          const copy = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return networkResponse;
+      } catch {
+        const cached = await caches.match(event.request);
+        return cached || Response.error();
+      }
+    })()
   );
 });
