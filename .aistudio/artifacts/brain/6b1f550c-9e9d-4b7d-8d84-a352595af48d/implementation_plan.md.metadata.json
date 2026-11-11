@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan naprawy odczytu tętna (HR) z roweru Domyos po Bluetooth (zerowanie zamrożonego 120 BPM z symulatora, adaptacyjny dekoder ramki 0x2AD2, automatyczna subskrypcja usługi 0x180D na rowerze oraz bezpośrednie parowanie zewnętrznego pasa tętna BLE 0x180D z telefonem) wraz z wbudowanym w Kokpit Skanerem i Dekoderem Ramek BLE na Żywo (HEX Sniffer) zapisującym próbki do Firebase i schowka.",
-  "updatedAt":  "2026-11-10T18:56:20.401138123Z",
+  "summary":  "Plan wdrożenia 7 poprawek po udanym teście: moduł prędkości i dystansu z obwodu koła 700c (2.105 m) i czasu jazdy, automatyczne okno zakończenia po ostatnim interwale, czerwony alert niskiej kadencji, usuwanie wykonanych treningów z OPFS i Firebase, zapisywanie flag synchronizacji Intervals.icu/Google Fit bezpośrednio w Firebase Firestore (brak duplikatów po wyczyszczeniu cache), naprawa błędu 403 Google Fitness API z linkiem aktywacyjnym i przełącznikiem oraz przycisk wymuszenia aktualizacji aplikacji PWA z GitHub Pages.",
+  "updatedAt":  "2026-11-11T11:26:44.468704545Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

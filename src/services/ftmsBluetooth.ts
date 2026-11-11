@@ -9,6 +9,8 @@ import {
   recordPrivateAuditLog,
   syncPrivateAuditLogsWithFirestore,
 } from './securityAndAuditLogger';
+import { calculate700cWheelSpeedAndDistance } from './rampAndPhysiologyEngine';
+
 
 const FTMS_SERVICE_UUID = 0x1826;
 const INDOOR_BIKE_DATA_UUID = 0x2ad2;
@@ -659,12 +661,21 @@ export class FtmsBikeController {
     }
   }
 
+  private lastDistanceIntegrationMs: number = 0;
+
+  public resetRideDistance() {
+    this.state.distanceMeters = 0;
+    this.lastDistanceIntegrationMs = Date.now();
+    this.emit();
+  }
+
   private resetLiveTelemetryOnModeSwitch() {
     this.recentPowers = [];
     this.state.powerWatts = 0;
     this.state.power3sAvgWatts = 0;
     this.state.cadenceRpm = 0;
     this.state.speedKmh = 0;
+    this.lastDistanceIntegrationMs = Date.now();
     if (!this.state.externalHrConnected) {
       this.state.heartRateBpm = 0;
       this.state.hrSource = 'none';
@@ -1193,8 +1204,7 @@ export class FtmsBikeController {
       );
       const baseHr = this.state.heartRateBpm > 40 ? this.state.heartRateBpm : 115;
       const simulatedHr = Math.round(baseHr + (targetHr - baseHr) * 0.08);
-      const speedKmh = Number((Math.pow(simulatedPower, 0.38) * 4.8).toFixed(1));
-      const deltaMeters = speedKmh / 3.6;
+      const { speedKmh } = calculate700cWheelSpeedAndDistance(simulatedCadence, 1);
 
       this.ingestTelemetry({
         powerWatts: simulatedPower,
@@ -1206,7 +1216,6 @@ export class FtmsBikeController {
           ? 'external_strap'
           : 'simulator',
         speedKmh,
-        distanceMeters: this.state.distanceMeters + deltaMeters,
         resistanceLevel: this.state.targetResistanceLevel,
       });
     }, 1000);
@@ -1284,19 +1293,24 @@ export class FtmsBikeController {
     if (parsed.cadenceRpm !== undefined) {
       this.state.cadenceRpm = parsed.cadenceRpm;
     }
-    if (parsed.speedKmh !== undefined) {
-      this.state.speedKmh = parsed.speedKmh;
-    } else if (this.state.powerWatts > 0) {
-      this.state.speedKmh = Number(
-        (Math.pow(this.state.powerWatts, 0.38) * 4.8).toFixed(1)
-      );
-    }
 
-    if (parsed.distanceMeters !== undefined && parsed.distanceMeters > 0) {
-      this.state.distanceMeters = parsed.distanceMeters;
-    } else {
-      this.state.distanceMeters += this.state.speedKmh / 3.6;
-    }
+    // Calculate speed (km/h) and distance delta (m) strictly from rotations per second (RPM/60)
+    // and standard 700c (28-inch, 2.105m) road wheel circumference multiplied by elapsed time
+    const nowMs = Date.now();
+    const elapsedSec =
+      this.lastDistanceIntegrationMs > 0
+        ? Math.min(5, Math.max(0, (nowMs - this.lastDistanceIntegrationMs) / 1000))
+        : 0;
+    this.lastDistanceIntegrationMs = nowMs;
+
+    const wheelMetrics = calculate700cWheelSpeedAndDistance(
+      this.state.cadenceRpm,
+      elapsedSec
+    );
+    this.state.speedKmh = wheelMetrics.speedKmh;
+    this.state.distanceMeters = Number(
+      (this.state.distanceMeters + wheelMetrics.distanceDeltaMeters).toFixed(2)
+    );
 
     if (parsed.resistanceLevel !== undefined) {
       this.state.resistanceLevel = parsed.resistanceLevel;

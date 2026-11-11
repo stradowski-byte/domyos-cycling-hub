@@ -207,6 +207,39 @@ export function getHrZoneForBpm(bpm: number, zones: HeartRateZone[]): HeartRateZ
 }
 
 /**
+ * Standard 700c (28-inch, 700x25c) road bike wheel circumference in meters.
+ * Speed is computed directly from rotations per second (RPS = RPM / 60) * circumference (2.105 m),
+ * and distance is computed by multiplying speed by elapsed ride time (time cancels out -> pure distance).
+ */
+export const ROAD_WHEEL_700C_CIRCUMFERENCE_M = 2.105;
+
+export function calculate700cWheelSpeedAndDistance(
+  cadenceRpm: number,
+  elapsedDeltaSec: number = 1
+): {
+  rotationsPerSec: number;
+  speedMetersPerSec: number;
+  speedKmh: number;
+  distanceDeltaMeters: number;
+} {
+  const safeRpm = Math.max(0, Number.isFinite(cadenceRpm) ? cadenceRpm : 0);
+  const safeSec = Math.max(0, Number.isFinite(elapsedDeltaSec) ? elapsedDeltaSec : 0);
+  const rotationsPerSec = safeRpm / 60;
+  const speedMetersPerSec = rotationsPerSec * ROAD_WHEEL_700C_CIRCUMFERENCE_M;
+  const speedKmh = Number((speedMetersPerSec * 3.6).toFixed(1));
+  // Distance = speed (m/s) * time (s) [or speed (km/h) * time (h) * 1000] — time cancels out
+  const distanceDeltaMeters = speedMetersPerSec * safeSec;
+
+  return {
+    rotationsPerSec,
+    speedMetersPerSec,
+    speedKmh,
+    distanceDeltaMeters,
+  };
+}
+
+
+/**
  * Parses Intervals.icu workout description syntax into executable WorkoutBlock[]
  * Supports:
  * - "- 10m ramp 50-75% 90rpm"

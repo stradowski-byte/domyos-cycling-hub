@@ -61,6 +61,41 @@ async function ensureDataSource(
   return created.dataStreamId;
 }
 
+export interface GoogleFitUploadResult {
+  ok: boolean;
+  sessionId?: string;
+  message: string;
+  fitnessApiDisabledUrl?: string;
+  projectNumber?: string;
+}
+
+function parseGoogleFit403DisabledError(rawErrorText: string): {
+  isApiDisabled: boolean;
+  projectNumber: string;
+  enableApiUrl: string;
+} {
+  const isApiDisabled =
+    /Fitness API has not been used in project/i.test(rawErrorText) ||
+    /accessNotConfigured/i.test(rawErrorText) ||
+    /SERVICE_DISABLED/i.test(rawErrorText) ||
+    /fitness\.googleapis\.com/i.test(rawErrorText);
+
+  const projectMatch = rawErrorText.match(/project\s+(\d{6,20})/i);
+  const projectNumber = projectMatch?.[1] || '782546220198';
+  const urlMatch = rawErrorText.match(
+    /https:\/\/console\.developers\.google\.com\/apis\/api\/fitness\.googleapis\.com\/overview\?project=\d+/i
+  );
+  const enableApiUrl =
+    urlMatch?.[0] ||
+    `https://console.developers.google.com/apis/api/fitness.googleapis.com/overview?project=${projectNumber}`;
+
+  return {
+    isApiDisabled,
+    projectNumber,
+    enableApiUrl,
+  };
+}
+
 /**
  * Uploads a CompletedActivity (Power samples, Heart Rate samples, Calories, and Indoor Cycling Session)
  * to the logged-in rider's personal Google Fit account via the Google Fitness REST API.
@@ -72,11 +107,7 @@ export async function uploadActivityToGoogleFit(
     userEmail?: string;
     interactiveRefreshIfExpired?: boolean;
   }
-): Promise<{
-  ok: boolean;
-  sessionId?: string;
-  message: string;
-}> {
+): Promise<GoogleFitUploadResult> {
   try {
     let token = getCachedGoogleFitToken(options?.userUid);
     if (!token && options?.interactiveRefreshIfExpired) {
@@ -220,7 +251,7 @@ export async function uploadActivityToGoogleFit(
     const sessionPayload = {
       id: sessionId,
       name: `${activity.workoutName} (${activity.avgPowerWatts}W NP ${activity.normalizedPowerWatts}W)`,
-      description: `Domyos Cycling Hub · Śr. Moc: ${activity.avgPowerWatts}W · NP: ${activity.normalizedPowerWatts}W · TSS: ${activity.tss} · Śr. HR: ${activity.avgHrBpm} bpm · Energia: ${activity.caloriesKcal} kcal`,
+      description: `Domyos Cycling Hub · Śr. Moc: ${activity.avgPowerWatts}W · NP: ${activity.normalizedPowerWatts}W · TSS: ${activity.tss} · Dystans (700c): ${(activity.totalDistanceMeters / 1000).toFixed(2)} km · Śr. Prędkość: ${activity.avgSpeedKmh} km/h · Śr. HR: ${activity.avgHrBpm} bpm · Energia: ${activity.caloriesKcal} kcal`,
       startTimeMillis,
       endTimeMillis,
       activityType: 15, // Stationary biking
@@ -244,6 +275,23 @@ export async function uploadActivityToGoogleFit(
 
     if (!sessionRes.ok) {
       const errTxt = await sessionRes.text();
+      if (sessionRes.status === 403) {
+        const parsed403 = parseGoogleFit403DisabledError(errTxt);
+        recordPrivateAuditLog(
+          'WARN',
+          'GOOGLE_FIT',
+          `Google Fitness API wyłączone w projekcie GCP (${parsed403.projectNumber})`,
+          parsed403.enableApiUrl
+        );
+        if (parsed403.isApiDisabled) {
+          return {
+            ok: false,
+            fitnessApiDisabledUrl: parsed403.enableApiUrl,
+            projectNumber: parsed403.projectNumber,
+            message: `Google Fitness API nie jest jeszcze włączone w Twoim projekcie Google Cloud (${parsed403.projectNumber}). Kliknij przycisk poniżej, aby włączyć Fitness API jednym kliknięciem lub wyłącz integrację Google Fit.`,
+          };
+        }
+      }
       return {
         ok: false,
         message: `Błąd zapisu sesji w Google Fit (${sessionRes.status}): ${errTxt.slice(0, 120)}`,
@@ -253,12 +301,23 @@ export async function uploadActivityToGoogleFit(
     return {
       ok: true,
       sessionId,
-      message: `Wysłano trening „${activity.workoutName}” (${activity.avgPowerWatts}W, ${activity.avgHrBpm} bpm) na konto Google Fit!`,
+      message: `Wysłano trening „${activity.workoutName}” (${activity.avgPowerWatts}W, ${(activity.totalDistanceMeters / 1000).toFixed(2)} km, ${activity.avgHrBpm} bpm) na konto Google Fit!`,
     };
   } catch (err: any) {
+    const rawMsg = err?.message || 'Nie udało się wysłać danych do Google Fit.';
+    if (/403/.test(rawMsg) || /Fitness API has not been used/i.test(rawMsg)) {
+      const parsed403 = parseGoogleFit403DisabledError(rawMsg);
+      return {
+        ok: false,
+        fitnessApiDisabledUrl: parsed403.enableApiUrl,
+        projectNumber: parsed403.projectNumber,
+        message: `Google Fitness API jest wyłączone w projekcie Google Cloud (${parsed403.projectNumber}). Włącz usługę w Google Cloud lub wyłącz Google Fit w profilu.`,
+      };
+    }
     return {
       ok: false,
-      message: err?.message || 'Nie udało się wysłać danych do Google Fit.',
+      message: rawMsg,
     };
   }
 }
+

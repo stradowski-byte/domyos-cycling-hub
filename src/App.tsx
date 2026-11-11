@@ -18,6 +18,8 @@ import {
   X,
   Sparkles,
   ExternalLink,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -33,6 +35,7 @@ import {
 } from './types/cycling';
 import {
   buildPowerZonesFromFtp,
+  calculate700cWheelSpeedAndDistance,
   calculateActivitySummary,
   calculateBlockInstantTarget,
   calculateLocalWellnessSeries,
@@ -58,6 +61,7 @@ import {
 } from './lib/firebase';
 import { recordPrivateAuditLog } from './services/securityAndAuditLogger';
 import {
+  deleteCompletedActivityEverywhere,
   deletePlannedWorkoutFromFirestore,
   deleteWorkoutTxtFromLocalOpfs,
   ensureActivityHasRecords,
@@ -82,6 +86,7 @@ import {
   subscribeToFirestoreHub,
   syncAllStateToFirestore,
   syncWorkoutsWithLocalOpfs,
+  updateCompletedActivityExternalSyncInFirestore,
 } from './services/firebaseSyncService';
 import { uploadActivityToGoogleFit } from './services/googleFitService';
 import {
@@ -227,12 +232,22 @@ export default function App() {
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [isFocusHudMode, setIsFocusHudMode] = useState(false);
 
-  // Completed Ride Modal
+  // Completed Ride Modal & Auto-Finish Proposal after Final Interval
   const [justFinishedActivity, setJustFinishedActivity] =
     useState<CompletedActivity | null>(null);
+  const [autoShowFinishConfirm, setAutoShowFinishConfirm] = useState(false);
 
   // Firebase Auth, Firestore Real-Time & Fast User Switcher State
   const [googleUser, setGoogleUser] = useState<User | null>(null);
+  const [firestoreActivitiesLoaded, setFirestoreActivitiesLoaded] =
+    useState(false);
+  const inFlightIntervalsIdsRef = useRef<Set<string>>(new Set());
+  const rideDistanceMetersRef = useRef<number>(0);
+  const [googleFitErrorInfo, setGoogleFitErrorInfo] = useState<{
+    message: string;
+    enableApiUrl?: string;
+    projectNumber?: string;
+  } | null>(null);
   const [knownRiders, setKnownRiders] = useState<KnownGoogleRider[]>(() =>
     getKnownGoogleRiders()
   );
@@ -275,6 +290,30 @@ export default function App() {
       return;
     }
     setIsPwaInstallGuideOpen(true);
+  };
+
+  const handleForceUpdatePwa = async () => {
+    try {
+      showToast(
+        'Sprawdzam i pobieram najnowszą wersję aplikacji z GitHub Pages...'
+      );
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) {
+          await reg.update();
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        }
+      }
+      if ('caches' in window) {
+        const keys = await window.caches.keys();
+        await Promise.all(keys.map((k) => window.caches.delete(k)));
+      }
+      window.setTimeout(() => window.location.reload(), 650);
+    } catch {
+      window.location.reload();
+    }
   };
 
   // Automatic PWA Service Worker Update on Startup
@@ -427,15 +466,37 @@ export default function App() {
           },
           onActivitiesSnapshot: (cloudActivities) => {
             setActivities((prev) => {
+              const cloudIds = new Set(cloudActivities.map((c) => c.id));
               const map = new Map<string, CompletedActivity>();
-              for (const a of prev) map.set(a.id, a);
+              // Keep only locally pending unsynced rides that aren't in Firebase yet
+              for (const a of prev) {
+                if (
+                  !cloudIds.has(a.id) &&
+                  (a.pendingFirebaseSync || a.pendingDriveSync) &&
+                  !a.syncedToFirebase
+                ) {
+                  map.set(a.id, a);
+                }
+              }
+              // Cloud Firebase is the single source of truth for completedWorkouts and external sync flags
               for (const ca of cloudActivities) {
-                const existing = map.get(ca.id);
+                const existing = prev.find((p) => p.id === ca.id);
                 map.set(ca.id, {
                   ...existing,
                   ...ca,
+                  syncedToIntervals: Boolean(
+                    ca.syncedToIntervals || existing?.syncedToIntervals
+                  ),
+                  intervalsActivityId:
+                    ca.intervalsActivityId || existing?.intervalsActivityId,
+                  syncedToGoogleFit: Boolean(
+                    ca.syncedToGoogleFit || existing?.syncedToGoogleFit
+                  ),
+                  googleFitSessionId:
+                    ca.googleFitSessionId || existing?.googleFitSessionId,
                   records:
-                    existing?.records && existing.records.length > (ca.records?.length || 0)
+                    existing?.records &&
+                    existing.records.length > (ca.records?.length || 0)
                       ? existing.records
                       : ca.records || [],
                 });
@@ -446,6 +507,7 @@ export default function App() {
                   new Date(a.startedAtIso).getTime()
               );
             });
+            setFirestoreActivitiesLoaded(true);
           },
           onKnownRidersSnapshot: (riders) => {
             setKnownRiders(riders);
@@ -530,8 +592,20 @@ export default function App() {
         ftmsController.applyTargetLoad(targetWatts, targetResistance, false);
 
         // Record 1Hz telemetry samples (catching up if app was in background on Android)
+        // Speed (km/h) & Distance (m) are computed strictly from rotations/sec (RPM/60) * 700c wheel (2.105m) * 1s
+        const effectiveCadenceRpm =
+          bike.cadenceRpm || (bike.isSimulator ? 88 : 0);
+        const wheel1Hz = calculate700cWheelSpeedAndDistance(
+          effectiveCadenceRpm,
+          1
+        );
         const newSamples: TelemetryRecord[] = [];
         for (let s = 1; s <= secondsDelta; s++) {
+          rideDistanceMetersRef.current = Number(
+            (
+              rideDistanceMetersRef.current + wheel1Hz.distanceDeltaMeters
+            ).toFixed(2)
+          );
           newSamples.push({
             timestampMs: Date.now() - (secondsDelta - s) * 1000,
             elapsedSec: elapsedWorkoutSecRef.current + s,
@@ -541,16 +615,9 @@ export default function App() {
             externalPowerWatts: bike.externalPowerWatts ?? undefined,
             powerMatchOffsetWatts: bike.powerMatchOffsetWatts,
             heartRateBpm: bike.heartRateBpm || (bike.isSimulator ? 125 : 0),
-            cadenceRpm: bike.cadenceRpm || (bike.isSimulator ? 88 : 0),
-            speedKmh:
-              bike.speedKmh > 0
-                ? bike.speedKmh
-                : Number(
-                    (
-                      Math.pow(bike.powerWatts || targetWatts, 0.38) * 4.8
-                    ).toFixed(1)
-                  ),
-            distanceMeters: bike.distanceMeters,
+            cadenceRpm: effectiveCadenceRpm,
+            speedKmh: wheel1Hz.speedKmh,
+            distanceMeters: Math.round(rideDistanceMetersRef.current),
             resistanceLevel: bike.resistanceLevel || targetResistance,
           });
         }
@@ -575,10 +642,11 @@ export default function App() {
             );
             return Math.max(0, nextSec - block.durationSec);
           } else {
-            // End of final block
+            // End of final block -> Pause timer and automatically open Finish & Save .FIT confirmation modal!
             setIsPaused(true);
+            setAutoShowFinishConfirm(true);
             showToast(
-              'Trening dobiegł końca! Kliknij „Zakończ”, aby zapisać plik .FIT w Firebase i Google Fit.'
+              'Ostatni interwał zakończony! Potwierdź zapis pliku .FIT w oknie podsumowania.'
             );
             return block.durationSec;
           }
@@ -600,7 +668,11 @@ export default function App() {
       );
     }
 
+    setAutoShowFinishConfirm(false);
+
     if (!isRunning) {
+      ftmsController.resetRideDistance();
+      rideDistanceMetersRef.current = 0;
       setRideStartedAtIso(new Date().toISOString());
       setElapsedWorkoutSec(0);
       setCurrentBlockIndex(0);
@@ -699,58 +771,7 @@ export default function App() {
       return;
     }
 
-    // 2. If online and Intervals.icu is configured for this profile, auto-upload .FIT to Intervals.icu
-    if (
-      activeProfile.intervals.enabled &&
-      activeProfile.intervals.apiKey.trim()
-    ) {
-      uploadActivityFitToIntervals(
-        activeProfile.intervals,
-        summaryWithFitBase64
-      )
-        .then((intRes) => {
-          if (intRes.ok) {
-            setActivities((prev) =>
-              prev.map((a) =>
-                a.id === summary.id
-                  ? {
-                      ...a,
-                      syncedToIntervals: true,
-                      intervalsActivityId: intRes.activityId,
-                    }
-                  : a
-              )
-            );
-          }
-        })
-        .catch(() => {});
-    }
-
-    // 3. Auto-upload to Google Fit if enabled on profile
-    if (activeProfile.googleFit?.enabled !== false && googleUser) {
-      uploadActivityToGoogleFit(summaryWithFitBase64, {
-        userUid: googleUser.uid,
-        userEmail: googleUser.email || undefined,
-      })
-        .then((fitRes) => {
-          if (fitRes.ok) {
-            setActivities((prev) =>
-              prev.map((a) =>
-                a.id === summary.id
-                  ? {
-                      ...a,
-                      syncedToGoogleFit: true,
-                      googleFitSessionId: fitRes.sessionId,
-                    }
-                  : a
-              )
-            );
-          }
-        })
-        .catch(() => {});
-    }
-
-    // 4. Upload to central Firebase Cloud Firestore (with full .FIT in Base64)
+    // 2. Upload to central Firebase Cloud Firestore first (with full .FIT in Base64)
     if (googleUser) {
       try {
         await saveCompletedActivityToFirestore(summaryWithFitBase64);
@@ -779,7 +800,7 @@ export default function App() {
             : null
         );
         showToast(
-          `Zapisano trening i binarny plik .FIT w centralnej bazie Firebase Cloud Firestore oraz w OPFS!`
+          `Zapisano trening (${(summary.totalDistanceMeters / 1000).toFixed(2)} km, ${summary.avgSpeedKmh} km/h) i plik .FIT w Firebase Cloud Firestore oraz w OPFS!`
         );
       } catch (err) {
         recordPrivateAuditLog(
@@ -796,6 +817,96 @@ export default function App() {
       showToast(
         `Zapisano .FIT w OPFS — zaloguj się kontem Google, aby zsynchronizować z Firebase i Google Fit!`
       );
+    }
+
+    // 3. If online and Intervals.icu is configured for this profile, auto-upload .FIT to Intervals.icu
+    // and immediately persist syncedToIntervals = true in Firebase Cloud Firestore!
+    if (
+      activeProfile.intervals.enabled &&
+      activeProfile.intervals.apiKey.trim() &&
+      !inFlightIntervalsIdsRef.current.has(summary.id)
+    ) {
+      inFlightIntervalsIdsRef.current.add(summary.id);
+      uploadActivityFitToIntervals(
+        activeProfile.intervals,
+        summaryWithFitBase64
+      )
+        .then(async (intRes) => {
+          if (intRes.ok) {
+            setActivities((prev) =>
+              prev.map((a) =>
+                a.id === summary.id
+                  ? {
+                      ...a,
+                      syncedToIntervals: true,
+                      intervalsActivityId: intRes.activityId,
+                    }
+                  : a
+              )
+            );
+            setJustFinishedActivity((prev) =>
+              prev && prev.id === summary.id
+                ? {
+                    ...prev,
+                    syncedToIntervals: true,
+                    intervalsActivityId: intRes.activityId,
+                  }
+                : prev
+            );
+            await updateCompletedActivityExternalSyncInFirestore(summary.id, {
+              syncedToIntervals: true,
+              intervalsActivityId: intRes.activityId,
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlightIntervalsIdsRef.current.delete(summary.id);
+        });
+    }
+
+    // 4. Auto-upload to Google Fit if enabled on profile and persist syncedToGoogleFit in Firebase!
+    if (activeProfile.googleFit?.enabled !== false && googleUser) {
+      uploadActivityToGoogleFit(summaryWithFitBase64, {
+        userUid: googleUser.uid,
+        userEmail: googleUser.email || undefined,
+      })
+        .then(async (fitRes) => {
+          if (fitRes.ok) {
+            setGoogleFitErrorInfo(null);
+            setActivities((prev) =>
+              prev.map((a) =>
+                a.id === summary.id
+                  ? {
+                      ...a,
+                      syncedToGoogleFit: true,
+                      googleFitSessionId: fitRes.sessionId,
+                    }
+                  : a
+              )
+            );
+            setJustFinishedActivity((prev) =>
+              prev && prev.id === summary.id
+                ? {
+                    ...prev,
+                    syncedToGoogleFit: true,
+                    googleFitSessionId: fitRes.sessionId,
+                  }
+                : prev
+            );
+            await updateCompletedActivityExternalSyncInFirestore(summary.id, {
+              syncedToGoogleFit: true,
+              googleFitSessionId: fitRes.sessionId,
+            });
+          } else if (fitRes.fitnessApiDisabledUrl) {
+            setGoogleFitErrorInfo({
+              message: fitRes.message,
+              enableApiUrl: fitRes.fitnessApiDisabledUrl,
+              projectNumber: fitRes.projectNumber,
+            });
+          }
+        })
+        .catch(() => {});
     }
   };
 
@@ -1044,6 +1155,7 @@ export default function App() {
     });
     showToast(res.message);
     if (res.ok) {
+      setGoogleFitErrorInfo(null);
       setActivities((prev) =>
         prev.map((a) =>
           a.id === activity.id
@@ -1055,7 +1167,65 @@ export default function App() {
             : a
         )
       );
+      setJustFinishedActivity((prev) =>
+        prev && prev.id === activity.id
+          ? {
+              ...prev,
+              syncedToGoogleFit: true,
+              googleFitSessionId: res.sessionId,
+            }
+          : prev
+      );
+      await updateCompletedActivityExternalSyncInFirestore(activity.id, {
+        syncedToGoogleFit: true,
+        googleFitSessionId: res.sessionId,
+      });
+    } else if (res.fitnessApiDisabledUrl) {
+      setGoogleFitErrorInfo({
+        message: res.message,
+        enableApiUrl: res.fitnessApiDisabledUrl,
+        projectNumber: res.projectNumber,
+      });
     }
+  };
+
+  const handleDeleteCompletedActivity = async (activity: CompletedActivity) => {
+    setActivities((prev) => prev.filter((a) => a.id !== activity.id));
+    setJustFinishedActivity((prev) =>
+      prev && prev.id === activity.id ? null : prev
+    );
+    try {
+      await deleteCompletedActivityEverywhere(activity);
+      showToast(
+        `Usunięto wykonany trening „${activity.workoutName}” z aplikacji, lokalnego OPFS i chmury Firebase!`
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message ||
+          'Usunięto trening lokalnie (zostanie usunięty z Firebase po połączeniu).'
+      );
+    }
+  };
+
+  const handleToggleGoogleFitEnabled = (enabled: boolean) => {
+    const updatedProfile: AthleteProfile = {
+      ...activeProfile,
+      googleFit: {
+        enabled,
+        autoUploadActivities: enabled,
+      },
+      updatedAtIso: new Date().toISOString(),
+    };
+    setProfiles((prev) => ({ ...prev, [updatedProfile.id]: updatedProfile }));
+    saveProfileToFirestore(updatedProfile).catch(() => {});
+    if (!enabled) {
+      setGoogleFitErrorInfo(null);
+    }
+    showToast(
+      enabled
+        ? 'Włączono integrację Google Fit dla aktywnego profilu.'
+        : 'Wyłączono Google Fit — aplikacja używa teraz wyłącznie Firebase Cloud i Intervals.icu.'
+    );
   };
 
   // Pending Offline Sync Queue
@@ -1111,65 +1281,26 @@ export default function App() {
   };
 
   // Automatic Background Sync when WiFi reconnects (isOnline becomes true)
+  // Strictly gated on `firestoreActivitiesLoaded` so clearing browser cache NEVER re-uploads rides already marked `syncedToIntervals: true` in Firebase!
   const autoSyncInFlightRef = useRef(false);
   useEffect(() => {
-    if (!isOnline || autoSyncInFlightRef.current) return;
+    if (!isOnline || !googleUser || !firestoreActivitiesLoaded || autoSyncInFlightRef.current) {
+      return;
+    }
 
     const runAutoBackgroundSync = async () => {
       autoSyncInFlightRef.current = true;
       try {
         // 0. Flush any queued Offline-First mutations (profiles, tags, workouts, activities) in an atomic writeBatch
-        if (googleUser) {
-          const flushedBatchOps = await flushOfflineSyncQueueWithBatch();
-          if (flushedBatchOps > 0) {
-            showToast(
-              `Auto-Sync (writeBatch): Zsynchronizowano ${flushedBatchOps} operacji z kolejki Offline-First z Firebase!`
-            );
-          }
-        }
-
-        // 1. Auto-upload any unsynced activities to Intervals.icu if profile has API key
-        const unsyncedIntervals = activities.filter((a) => {
-          const prof = profiles[a.profileId];
-          return (
-            prof?.intervals?.enabled &&
-            prof?.intervals?.apiKey?.trim() &&
-            !a.syncedToIntervals
+        const flushedBatchOps = await flushOfflineSyncQueueWithBatch();
+        if (flushedBatchOps > 0) {
+          showToast(
+            `Auto-Sync (writeBatch): Zsynchronizowano ${flushedBatchOps} operacji z kolejki Offline-First z Firebase!`
           );
-        });
-
-        if (unsyncedIntervals.length > 0) {
-          let intSyncedCount = 0;
-          const syncedIntIds = new Map<string, string | undefined>();
-          for (const act of unsyncedIntervals) {
-            const prof = profiles[act.profileId];
-            if (!prof) continue;
-            const res = await uploadActivityFitToIntervals(prof.intervals, act);
-            if (res.ok) {
-              syncedIntIds.set(act.id, res.activityId);
-              intSyncedCount++;
-            }
-          }
-          if (intSyncedCount > 0) {
-            setActivities((prev) =>
-              prev.map((a) =>
-                syncedIntIds.has(a.id)
-                  ? {
-                      ...a,
-                      syncedToIntervals: true,
-                      intervalsActivityId: syncedIntIds.get(a.id),
-                    }
-                  : a
-              )
-            );
-            showToast(
-              `Auto-Sync (WiFi): Wysłano ${intSyncedCount} zaległych treningów .FIT do Intervals.icu!`
-            );
-          }
         }
 
-        // 2. Auto-upload any pending activities to Firebase Firestore if logged in with Google
-        if (googleUser && pendingFirebaseActivities.length > 0) {
+        // 1. Auto-upload any pending activities to Firebase Firestore first
+        if (pendingFirebaseActivities.length > 0) {
           let fbCount = 0;
           const syncedFbIds = new Set<string>();
           for (const pendingAct of pendingFirebaseActivities) {
@@ -1196,6 +1327,58 @@ export default function App() {
             );
           }
         }
+
+        // 2. Auto-upload any unsynced activities to Intervals.icu ONLY after Firebase snapshot is loaded
+        // and immediately persist syncedToIntervals = true in Firebase Firestore!
+        const unsyncedIntervals = activities.filter((a) => {
+          const prof = profiles[a.profileId];
+          return (
+            prof?.intervals?.enabled &&
+            prof?.intervals?.apiKey?.trim() &&
+            prof?.intervals?.autoUploadActivities !== false &&
+            !a.syncedToIntervals &&
+            !inFlightIntervalsIdsRef.current.has(a.id)
+          );
+        });
+
+        if (unsyncedIntervals.length > 0) {
+          let intSyncedCount = 0;
+          const syncedIntIds = new Map<string, string | undefined>();
+          for (const act of unsyncedIntervals) {
+            const prof = profiles[act.profileId];
+            if (!prof) continue;
+            inFlightIntervalsIdsRef.current.add(act.id);
+            try {
+              const res = await uploadActivityFitToIntervals(prof.intervals, act);
+              if (res.ok) {
+                syncedIntIds.set(act.id, res.activityId);
+                intSyncedCount++;
+                await updateCompletedActivityExternalSyncInFirestore(act.id, {
+                  syncedToIntervals: true,
+                  intervalsActivityId: res.activityId,
+                });
+              }
+            } finally {
+              inFlightIntervalsIdsRef.current.delete(act.id);
+            }
+          }
+          if (intSyncedCount > 0) {
+            setActivities((prev) =>
+              prev.map((a) =>
+                syncedIntIds.has(a.id)
+                  ? {
+                      ...a,
+                      syncedToIntervals: true,
+                      intervalsActivityId: syncedIntIds.get(a.id),
+                    }
+                  : a
+              )
+            );
+            showToast(
+              `Auto-Sync (WiFi): Wysłano ${intSyncedCount} zaległych treningów .FIT do Intervals.icu i oznaczono w Firebase!`
+            );
+          }
+        }
       } catch {
         // silent background retry on next online event
       } finally {
@@ -1205,7 +1388,7 @@ export default function App() {
 
     runAutoBackgroundSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline, googleUser, activities.length]);
+  }, [isOnline, googleUser, firestoreActivitiesLoaded, activities.length]);
 
   const handleDownloadHydratedFit = async (activity: CompletedActivity) => {
     const hydrated = await ensureActivityHasRecords(activity);
@@ -1290,23 +1473,42 @@ export default function App() {
   const handleUploadActivityToIntervals = async (
     activity: CompletedActivity
   ) => {
-    const res = await uploadActivityFitToIntervals(
-      activeProfile.intervals,
-      activity
-    );
-    showToast(res.message);
-    if (res.ok) {
-      setActivities((prev) =>
-        prev.map((a) =>
-          a.id === activity.id
+    if (inFlightIntervalsIdsRef.current.has(activity.id)) return;
+    inFlightIntervalsIdsRef.current.add(activity.id);
+    try {
+      const res = await uploadActivityFitToIntervals(
+        activeProfile.intervals,
+        activity
+      );
+      showToast(res.message);
+      if (res.ok) {
+        setActivities((prev) =>
+          prev.map((a) =>
+            a.id === activity.id
+              ? {
+                  ...a,
+                  syncedToIntervals: true,
+                  intervalsActivityId: res.activityId,
+                }
+              : a
+          )
+        );
+        setJustFinishedActivity((prev) =>
+          prev && prev.id === activity.id
             ? {
-                ...a,
+                ...prev,
                 syncedToIntervals: true,
                 intervalsActivityId: res.activityId,
               }
-            : a
-        )
-      );
+            : prev
+        );
+        await updateCompletedActivityExternalSyncInFirestore(activity.id, {
+          syncedToIntervals: true,
+          intervalsActivityId: res.activityId,
+        });
+      }
+    } finally {
+      inFlightIntervalsIdsRef.current.delete(activity.id);
     }
   };
 
@@ -1511,6 +1713,15 @@ export default function App() {
               <span>{pendingFirebaseActivities.length}</span>
             </button>
           )}
+
+          <button
+            onClick={handleForceUpdatePwa}
+            className="min-h-[34px] sm:min-h-[36px] px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] sm:text-xs font-semibold text-emerald-400 flex items-center gap-1 transition-colors"
+            title="Pobierz najnowszą wersję aplikacji z GitHub Pages i przeładuj Service Worker PWA"
+          >
+            <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden lg:inline">Aktualizuj</span>
+          </button>
 
           <button
             onClick={() =>
@@ -1870,6 +2081,8 @@ export default function App() {
             }}
             isFocusHudMode={isFocusHudMode}
             onToggleFocusHudMode={() => setIsFocusHudMode((v) => !v)}
+            autoShowFinishConfirm={autoShowFinishConfirm}
+            onDismissAutoFinishConfirm={() => setAutoShowFinishConfirm(false)}
           />
         )}
 
@@ -1888,6 +2101,7 @@ export default function App() {
               setSelectedWorkoutId(w.id);
               setCurrentBlockIndex(0);
               setElapsedInBlockSec(0);
+              setAutoShowFinishConfirm(false);
               setActiveTab('cockpit');
               if (startNow) {
                 const firstBlock = w.blocks[0];
@@ -1955,6 +2169,10 @@ export default function App() {
             onUploadToFirebase={handleUploadSingleActivityToFirebase}
             onUploadToGoogleFit={handleUploadSingleActivityToGoogleFit}
             onUploadToIntervals={handleUploadActivityToIntervals}
+            onDeleteActivity={handleDeleteCompletedActivity}
+            googleFitErrorInfo={googleFitErrorInfo}
+            onDismissGoogleFitError={() => setGoogleFitErrorInfo(null)}
+            onToggleGoogleFitEnabled={handleToggleGoogleFitEnabled}
           />
         )}
 
@@ -2057,13 +2275,48 @@ export default function App() {
                 </div>
               </div>
               <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3 min-w-0">
-                <div className="text-[11px] text-slate-400">CZAS / ŚR. HR</div>
+                <div className="text-[11px] text-slate-400">CZAS / DYSTANS (700c)</div>
                 <div className="font-mono-tabular text-lg sm:text-xl font-bold text-white mt-0.5 truncate">
                   {formatDurationClock(justFinishedActivity.durationSec)} ·{' '}
-                  {justFinishedActivity.avgHrBpm}
+                  {((justFinishedActivity.totalDistanceMeters || 0) / 1000).toFixed(2)} km
                 </div>
               </div>
             </div>
+
+            {googleFitErrorInfo && (
+              <div className="rounded-2xl bg-rose-950/35 border border-rose-500/60 p-3.5 space-y-2.5 text-xs">
+                <div className="flex items-start gap-2 text-rose-300 font-bold">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>
+                    Google Fitness API jest wyłączone w projekcie GCP (
+                    {googleFitErrorInfo.projectNumber || '782546220198'})
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={
+                      googleFitErrorInfo.enableApiUrl ||
+                      `https://console.developers.google.com/apis/api/fitness.googleapis.com/overview?project=${
+                        googleFitErrorInfo.projectNumber || '782546220198'
+                      }`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                    <span>Włącz Fitness API w Google Cloud</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGoogleFitEnabled(false)}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs"
+                  >
+                    Wyłącz Google Fit w profilu
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* AUTOMATIC FTP DETECTOR & 1-CLICK PROFILE UPDATE AFTER TEST WORKOUT */}
             {detectedPostRideFtp && (
@@ -2132,15 +2385,21 @@ export default function App() {
                   </span>
                 </button>
 
-                <button
-                  onClick={() =>
-                    handleUploadSingleActivityToGoogleFit(justFinishedActivity)
-                  }
-                  className="min-h-[44px] px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Activity className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Wyślij do Google Fit</span>
-                </button>
+                {activeProfile.googleFit?.enabled !== false && (
+                  <button
+                    onClick={() =>
+                      handleUploadSingleActivityToGoogleFit(justFinishedActivity)
+                    }
+                    className="min-h-[44px] px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Activity className="w-4 h-4 shrink-0" />
+                    <span className="truncate">
+                      {justFinishedActivity.syncedToGoogleFit
+                        ? 'Wysłano do Google Fit ✓'
+                        : 'Wyślij do Google Fit'}
+                    </span>
+                  </button>
+                )}
 
                 {activeProfile.intervals.enabled && (
                   <button
@@ -2149,7 +2408,11 @@ export default function App() {
                     }
                     className="sm:col-span-2 min-h-[44px] px-3 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
                   >
-                    <span className="truncate">Wyślij do Intervals.icu</span>
+                    <span className="truncate">
+                      {justFinishedActivity.syncedToIntervals
+                        ? 'Wysłano do Intervals.icu (Zapisano w Firebase) ✓'
+                        : 'Wyślij do Intervals.icu'}
+                    </span>
                   </button>
                 )}
               </div>

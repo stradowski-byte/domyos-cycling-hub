@@ -11,6 +11,10 @@ import {
   Zap,
   Heart,
   Calendar,
+  Trash2,
+  ExternalLink,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 import {
   AthleteProfile,
@@ -36,6 +40,14 @@ interface AnalyticsAndProgressViewProps {
   onUploadToFirebase: (activity: CompletedActivity) => void;
   onUploadToGoogleFit: (activity: CompletedActivity) => void;
   onUploadToIntervals: (activity: CompletedActivity) => void;
+  onDeleteActivity?: (activity: CompletedActivity) => Promise<void> | void;
+  googleFitErrorInfo?: {
+    message: string;
+    enableApiUrl?: string;
+    projectNumber?: string;
+  } | null;
+  onDismissGoogleFitError?: () => void;
+  onToggleGoogleFitEnabled?: (enabled: boolean) => void;
 }
 
 export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> = ({
@@ -49,10 +61,17 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
   onUploadToFirebase,
   onUploadToGoogleFit,
   onUploadToIntervals,
+  onDeleteActivity,
+  googleFitErrorInfo,
+  onDismissGoogleFitError,
+  onToggleGoogleFitEnabled,
 }) => {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const hasIntervalsConnected = Boolean(
     profile.intervals.enabled && profile.intervals.apiKey.trim()
   );
+  const isGoogleFitEnabled = profile.googleFit?.enabled !== false;
 
   const profileActivities = useMemo(
     () => activities.filter((a) => a.profileId === profile.id),
@@ -357,6 +376,69 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
             </div>
           </div>
 
+          {/* GOOGLE FIT 403 DISABLED API HELPER BANNER */}
+          {googleFitErrorInfo && (
+            <div className="rounded-2xl bg-rose-950/35 border border-rose-500/60 p-4 space-y-3 min-w-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 text-rose-300 min-w-0">
+                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1 min-w-0">
+                    <div className="text-xs sm:text-sm font-bold text-white">
+                      Google Fitness API jest wyłączone w projekcie Google Cloud (
+                      {googleFitErrorInfo.projectNumber || '782546220198'})
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed break-words">
+                      {googleFitErrorInfo.message}
+                    </p>
+                  </div>
+                </div>
+                {onDismissGoogleFitError && (
+                  <button
+                    onClick={onDismissGoogleFitError}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                <a
+                  href={
+                    googleFitErrorInfo.enableApiUrl ||
+                    `https://console.developers.google.com/apis/api/fitness.googleapis.com/overview?project=${
+                      googleFitErrorInfo.projectNumber || '782546220198'
+                    }`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <ExternalLink className="w-4 h-4 shrink-0" />
+                  <span>
+                    1. Włącz Fitness API w Google Cloud (Projekt{' '}
+                    {googleFitErrorInfo.projectNumber || '782546220198'})
+                  </span>
+                </a>
+
+                {onToggleGoogleFitEnabled && isGoogleFitEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleGoogleFitEnabled(false);
+                      onDismissGoogleFitError?.();
+                    }}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>
+                      2. Wyłącz Google Fit w profilu (używaj tylko Firebase + Intervals.icu)
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* COMPLETED ACTIVITIES & GARMIN .FIT / FIREBASE / GOOGLE FIT / INTERVALS EXPORT */}
           <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
@@ -365,9 +447,27 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                   Zakończone Treningi i Eksport Plików (.FIT w /User_Data/{profile.id}/Workouts_FIT)
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                  Pobierz binarny plik <code className="font-mono-tabular">.FIT</code> do Garmin Connect / Stravy, wyślij do Google Fit / Firebase lub kliknij „Krzywa 5s–20m”, aby przeanalizować szczyty mocy.
+                  Statusy synchronizacji (<strong className="text-sky-400">Intervals.icu</strong> i <strong className="text-rose-400">Google Fit</strong>) są zapisywane bezpośrednio w chmurze <strong className="text-emerald-400">Firebase Firestore</strong>, dzięki czemu wyczyszczenie pamięci podręcznej nigdy nie duplikuje wysyłki.
                 </p>
               </div>
+
+              {onToggleGoogleFitEnabled && (
+                <button
+                  type="button"
+                  onClick={() => onToggleGoogleFitEnabled(!isGoogleFitEnabled)}
+                  className={`min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0 ${
+                    isGoogleFitEnabled
+                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-rose-500/25'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                  title="Włącz lub wyłącz integrację Google Fit dla tego profilu"
+                >
+                  <Activity className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Google Fit: {isGoogleFitEnabled ? 'Włączony' : 'Wyłączony'}
+                  </span>
+                </button>
+              )}
             </div>
 
             {profileActivities.length === 0 ? (
@@ -385,6 +485,9 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
               <div className="space-y-3 min-w-0">
                 {profileActivities.map((act) => {
                   const isSelected = activeRide?.id === act.id;
+                  const distanceKm = Number(
+                    ((act.totalDistanceMeters || 0) / 1000).toFixed(2)
+                  );
                   return (
                     <div
                       key={act.id}
@@ -419,19 +522,23 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                                 : 'Pending'}
                             </strong>
                           </span>
-                          <span aria-hidden="true">·</span>
-                          <span>
-                            Google Fit:{' '}
-                            <strong
-                              className={
-                                act.syncedToGoogleFit
-                                  ? 'text-rose-400'
-                                  : 'text-slate-400'
-                              }
-                            >
-                              {act.syncedToGoogleFit ? 'Wysłano' : 'Gotowy'}
-                            </strong>
-                          </span>
+                          {isGoogleFitEnabled && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>
+                                Google Fit:{' '}
+                                <strong
+                                  className={
+                                    act.syncedToGoogleFit
+                                      ? 'text-rose-400'
+                                      : 'text-slate-400'
+                                  }
+                                >
+                                  {act.syncedToGoogleFit ? 'Wysłano' : 'Gotowy'}
+                                </strong>
+                              </span>
+                            </>
+                          )}
                           {hasIntervalsConnected && (
                             <>
                               <span aria-hidden="true">·</span>
@@ -444,7 +551,9 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                                       : 'text-slate-400'
                                   }
                                 >
-                                  {act.syncedToIntervals ? 'Wysłano' : 'Gotowy'}
+                                  {act.syncedToIntervals
+                                    ? 'Wysłano (Firebase)'
+                                    : 'Gotowy'}
                                 </strong>
                               </span>
                             </>
@@ -483,6 +592,12 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                             HR:{' '}
                             <strong className="text-rose-400">
                               {act.avgHrBpm}/{act.maxHrBpm} bpm
+                            </strong>
+                          </span>
+                          <span>
+                            Dystans (700c):{' '}
+                            <strong className="text-sky-400">
+                              {distanceKm} km ({act.avgSpeedKmh} km/h)
                             </strong>
                           </span>
                         </div>
@@ -527,22 +642,71 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                           <span className="truncate">Firebase</span>
                         </button>
 
-                        <button
-                          onClick={() => onUploadToGoogleFit(act)}
-                          className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
-                        >
-                          <Activity className="w-4 h-4 shrink-0" />
-                          <span className="truncate">Google Fit</span>
-                        </button>
+                        {isGoogleFitEnabled && (
+                          <button
+                            onClick={() => onUploadToGoogleFit(act)}
+                            className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
+                          >
+                            <Activity className="w-4 h-4 shrink-0" />
+                            <span className="truncate">
+                              {act.syncedToGoogleFit ? 'Google Fit ✓' : 'Google Fit'}
+                            </span>
+                          </button>
+                        )}
 
                         {hasIntervalsConnected && (
                           <button
                             onClick={() => onUploadToIntervals(act)}
                             className="col-span-2 sm:col-span-1 min-h-[40px] px-3 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate"
                           >
-                            <span className="truncate">Intervals.icu</span>
+                            <span className="truncate">
+                              {act.syncedToIntervals
+                                ? 'Intervals.icu ✓'
+                                : 'Intervals.icu'}
+                            </span>
                           </button>
                         )}
+
+                        {onDeleteActivity &&
+                          (confirmDeleteId === act.id ? (
+                            <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5">
+                              <button
+                                onClick={async () => {
+                                  setIsDeletingId(act.id);
+                                  try {
+                                    await onDeleteActivity(act);
+                                  } finally {
+                                    setIsDeletingId(null);
+                                    setConfirmDeleteId(null);
+                                  }
+                                }}
+                                disabled={isDeletingId === act.id}
+                                className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                <span>
+                                  {isDeletingId === act.id
+                                    ? 'Usuwanie...'
+                                    : 'Potwierdź Usuń'}
+                                </span>
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="min-h-[40px] px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                              >
+                                Anuluj
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteId(act.id)}
+                              className="min-h-[40px] px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                              title="Usuń ten wykonany trening z aplikacji, lokalnego OPFS i chmury Firebase"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Usuń</span>
+                            </button>
+                          ))}
                       </div>
                     </div>
                   );

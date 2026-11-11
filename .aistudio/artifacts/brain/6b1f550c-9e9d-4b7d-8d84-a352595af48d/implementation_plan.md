@@ -1,63 +1,86 @@
-# Plan Implementacji: Wieloźródłowy Odczyt Tętna (HR) + Skaner Ramek BLE na Żywo (HEX Sniffer) w Kokpicie
+# Poprawki Po-Testowe: Koło 700c (Prędkość i Dystans), Auto-Zakończenie, Alert Kadencji, Usuwanie Jazd, Synchronizacja Intervals.icu przez Firebase, Google Fit 403 i Aktualizator PWA
 
-## 1. Cel i Diagnoza Problemu
-1. **Usunięcie zamrożonego `120 BPM` po przejściu z Symulatora na Bluetooth**:
-   - W obecnej wersji `startSimulator()` ustawia `heartRateBpm = 118..120`, a `connectDomyosBle()` zatrzymuje timer symulatora, lecz nie zeruje `heartRateBpm`. Gdy rower nie zwraca dodatniego HR w standardowym offsecie, wartość `120 BPM` wisi na ekranie przez cały trening.
-   - Rozwiązanie: natychmiastowe zerowanie `heartRateBpm: 0` przy zatrzymaniu symulatora i starcie połączenia BLE oraz wygaszanie odczytu HR (`0 BPM`), jeśli przez `> 8 sekund` nie nadeszła żadna próbka tętna.
-2. **Dwa niezależne źródła tętna (Rower FTMS + Bezpośredni Pas Tętna BLE `0x180D`)**:
-   - **Źródło A (Przez konsolę roweru Domyos)**:
-     - Ulepszony parser `parseFtmsIndoorBikeData (0x2AD2)` obsługujący zarówno standardowy układ Bluetooth SIG (Bit 9 `0x0200`), jak i przesunięcia offsetu w firmware Domyos/ChangYow (1-bajtowy vs 2-bajtowy opór, dzielone ramki `More Data = 1` oraz konfigurowalny offset bajtu HR).
-     - Automatyczne nasłuchiwanie usługi `0x180D` (`Heart Rate Measurement 0x2A37`) oraz dodatkowych charakterystyk powiadomień bezpośrednio na połączeniu GATT roweru.
-   - **Źródło B (Bezpośrednie połączenie Pasa Tętna BLE `0x180D` z telefonem)**:
-     - Nowy przycisk **„+ Pas HR BLE”** w Kokpicie umożliwiający sparowanie dowolnego pasa tętna Bluetooth (Polar, Garmin, Decathlon, Coospo, Magene) bezpośrednio z telefonem równolegle z rowerem Domyos.
-3. **Wbudowany w Kokpit „Skaner i Dekoder Ramek BLE na Żywo (HEX Sniffer)”**:
-   - Pozwala podejrzeć surowe bajty wysyłane przez rower w czasie rzeczywistym, ręcznie przypiąć dowolny bajt ramki jako źródło HR jednym dotknięciem oraz **skopiować zrzut ramek HEX do schowka lub zapisać go w Firebase (`/securityAuditLogs`)**, aby w razie niestandardowego protokołu od razu zobaczyć dokładną strukturę bajtów.
+Plan obejmuje 7 usprawnień po pierwszym pełnym teście treningowym na rowerze: realistyczne wyliczanie prędkości i dystansu z obwodu koła szosowego 700c (`2.105 m`) i czasu jazdy, automatyczne wywołanie okna zakończenia treningu po ostatnim interwale, czerwony alert zbyt niskiej kadencji, funkcję usuwania wykonanych treningów (z aplikacji, OPFS i Firebase), trwały zapis statusu wysyłki do Intervals.icu/Google Fit w kolekcji `/completedWorkouts` w Firebase (eliminujący duplikaty po wyczyszczeniu cache), obsługę błędu `403` Google Fitness API oraz przycisk ręcznej aktualizacji aplikacji PWA z GitHub Pages.
+
+## User Review & Critical Decisions
+
+> [!IMPORTANT]
+> Poniższe decyzje zostały potwierdzone i zostaną wdrożone w dokładnie takiej postaci:
+
+- **Potwierdzona Decyzja 1 (Prędkość `km/h` i Dystans `km` z koła 700c i czasu jazdy)**: Prędkość wyliczamy wyłącznie z liczby obrotów na sekundę ($\text{RPS} = \text{RPM} / 60$) pomnożonej przez obwód koła szosowego 700c / 28 cali ($2.105\text{ m}$), a dystans wynika z pomnożenia prędkości przez rzeczywisty czas jazdy ($\Delta d = v \times \Delta t$, gdzie czas się skraca i zostają same kilometry/metry), całkowicie ignorując zawyżony licznik z konsoli roweru oraz eliminując błąd wielokrotnego naliczania dystansu przy pakietach BLE przychodzących kilka razy na sekundę.
+- **Potwierdzona Decyzja 2 (Koniec ostatniego interwału w Kokpicie)**: Gdy licznik ostatniego odcinka treningu dojdzie do `00:00`, aplikacja automatycznie otwiera na ekranie Kokpitu okno potwierdzenia **„Zakończyć i zapisać trening .FIT?”**.
+- **Potwierdzona Decyzja 3 (Błąd 403 Google Fitness API)**: Aplikacja rozpoznaje błąd `403 (Fitness API has not been used in project ...)` i wyświetla bezpośredni przycisk prowadzący do włączenia **Fitness API** w Google Cloud Console dla projektu użytkownika (`782546220198`) oraz udostępnia wygodny przełącznik wyłączenia integracji z Google Fit.
 
 ---
 
-## 2. Szczegółowe Zmiany w Kodzie
+## 1. Overview & Core Concept
 
-### A. Rozbudowa `src/types/cycling.ts` i `src/services/ftmsBluetooth.ts`
-- Dodanie do `LiveBikeTelemetry` pól:
-  - `externalHrConnected: boolean`
-  - `externalHrDeviceName: string`
-  - `hrSource: 'none' | 'bike_ftms' | 'bike_hr_service' | 'external_strap' | 'custom_byte_offset' | 'simulator'`
-  - `customHrByteOffset: number | null` (opcjonalny indeks bajtu w ramce `0x2AD2` zapisywany w `localStorage`)
-- Dodanie struktury diagnostycznej `BleRawPacketSample`:
-  - `timestampIso: string`
-  - `characteristicUuid: string` (`0x2AD2`, `0x2A37`, itp.)
-  - `flagsHex: string`
-  - `activeFlagNames: string[]`
-  - `rawBytesHex: string` (np. `64 02 A0 00 4B 00 ...`)
-  - `uint8Values: number[]`
-  - `parsedSummary: string`
-- W `FtmsBikeController`:
-  - **Reset telemetrii przy połączeniu BLE**: zerowanie `heartRateBpm: 0` i `hrSource: 'none'`.
-  - **Automatyczna enumeracja GATT roweru (`discoveredGattMap`)**: po połączeniu z rowerem pobranie listy dostępnych usług (`getPrimaryServices()`) i charakterystyk, automatyczne podpięcie `0x180D` → `0x2A37` (jeśli rower wystawia tętno na standardowej usłudze HR) oraz zapisywanie ostatnich 35 surowych ramek w buforze Sniffera.
-  - **Adaptacyjny dekoder `parseFtmsIndoorBikeData(data, customHrByteOffset)`**:
-    - Jeśli użytkownik wybrał ręczny `customHrByteOffset`, pobiera `data.getUint8(customHrByteOffset)`.
-    - Jeśli flaga `Bit 9 (0x0200)` jest aktywna, a wyliczony standardowy `offset` wykracza poza `data.byteLength` lub wskazuje `0`, inteligentny fallback sprawdza również przesunięcie o `-1` / `-2` bajty (przypadek 1-bajtowego pola oporu/energii w konsolach Domyos) oraz ostatni bajt przed ewentualnym `Elapsed Time`.
-  - **Metoda `connectExternalHeartRateStrap()`**:
-    - Wywołuje `navigator.bluetooth.requestDevice({ filters: [{ services: [0x180d] }] })`, subskrybuje `0x2A37` (`Heart Rate Measurement` — obsługując zarówno format 8-bitowy `flags & 0x01 === 0`, jak i 16-bitowy `flags & 0x01 !== 0`), automatycznie wznawia połączenie po zerwaniu i nadaje zewnętrznemu pasowi najwyższy priorytet odczytu HR.
-
-### B. Nowy Modal / Panel Diagnostyczny `src/components/BlePacketSnifferModal.tsx`
-- Otwierany przyciskiem **„Sniffer BLE / HR”** bezpośrednio z górnego paska w **Kokpicie (`2. Kokpit na Żywo`)**:
-  1. **Status Źródła Tętna i Szybkie Parowanie Pasa HR (`0x180D`)**:
-     - Pokazuje aktualne źródło tętna (`Pas zewnętrzny BLE`, `Konsola roweru FTMS 0x2AD2`, `Usługa 0x180D roweru` lub `Ręczny offset bajtu [i]`).
-     - Przycisk **„Połącz Pas Tętna BLE bezpośrednio z telefonem (0x180D)”**.
-  2. **Interaktywny Inspektor Bajtów Ramki `0x2AD2` na Żywo**:
-     - Wyświetla ostatnią odebraną ramkę w rozbiciu na pojedyncze kafelki bajtów `Bajt [0] .. Bajt [N]` z wartością `HEX`, `uint8` (0–255) oraz `uint16 LE`.
-     - Kliknięcie dowolnego kafelka `Bajt [i]` pozwala ustawić go jako **„Używaj Bajtu [i] jako HR”** (lub przywrócić tryb automatyczny).
-  3. **Lista Wykrytych Usług GATT Roweru + Historia Ostatnich 30 Ramek HEX**:
-     - Przycisk **„Kopiuj Zrzut Ramek HEX do Schowka”** (gotowy blok diagnostyczny do wklejenia na czacie).
-     - Przycisk **„Zapisz Zrzut Ramek BLE w Firebase (`/securityAuditLogs`)”**, który trwale zapisuje próbki pakietów z roweru w Twojej bazie Firestore.
-
-### C. Integracja w `src/components/LiveCockpitView.tsx` oraz `src/App.tsx`
-- Dodanie w Kokpicie przycisku **„+ Pas HR BLE”** oraz przycisku **„Sniffer BLE”** (otwierającego `BlePacketSnifferModal`).
-- Wyświetlenie na kafelku Tętna (HR) czytelnej odznaki źródła sygnału (np. `PAS BLE`, `FTMS`, `BAJT #X` lub `BRAK SYGNAŁU HR`, gdy wartość wynosi `0 BPM`).
+- **Co zmienia ta aktualizacja**:
+  1. **Moduł Koła Szosowego 700c (`2.105 m`)**: Zamiast ufać zawyżonemu licznikowi z konsoli roweru lub dodawać dystans przy każdej ramce Bluetooth (co dawało 74 km w 1h), aplikacja liczy prędkość z relacji obrotów na sekundę do obwodu koła 28" / 700c ($2.105\text{ m}$) i całkuje drogę ściśle po czasie zegara treningowego ($d = v \times t$).
+  2. **Automatyczne okno zakończenia po ostatnim interwale**: Po ukończeniu ostatniego bloku na ekranie Kokpitu od razu pojawia się modal potwierdzenia zakończenia i zapisu pliku `.FIT`.
+  3. **Czerwony alert zbyt niskiej kadencji**: Spadek kadencji o więcej niż `5 RPM` poniżej celu zmienia kolor paska, obramowania i komunikatu w kafelku Kadencji na wyraźny czerwony (`ZA NISKO! +X RPM`).
+  4. **Usuwanie wykonanych treningów**: W zakładce **3. Postępy i FIT** każdy zapisany trening otrzymuje przycisk usunięcia (z potwierdzeniem), który kasuje go z listy, z pamięci `OPFS` na telefonie oraz z kolekcji `/completedWorkouts` w Firebase.
+  5. **Firebase jako jedyne źródło prawdy o synchronizacji Intervals.icu i Google Fit**: Informacja `syncedToIntervals: true` (`intervalsActivityId`) oraz `syncedToGoogleFit: true` jest natychmiast zapisywana w dokumencie `/completedWorkouts/{id}` w Firebase Cloud Firestore. Auto-Sync czeka na załadowanie danych z Firebase i nigdy nie wysyła ponownie treningu po wyczyszczeniu cache przeglądarki.
+  6. **Przycisk „Aktualizuj Aplikację” (PWA Update)**: Jedno kliknięcie na górnym pasku lub w zakładce **5. Chmura Firebase** wymusza pobranie nowego Service Workera z GitHub Pages, czyści pamięć podręczną zasobów i przeładowuje aplikację do najnowszej wersji.
 
 ---
 
-## 3. Weryfikacja
-1. Sprawdzenie kompilacji TypeScript (`lint_applet`) i pełnego buildu produkcyjnego (`compile_applet`).
-2. Weryfikacja, że po wyłączeniu symulatora HR natychmiast spada do `0` (`-- BPM`) zamiast wisieć na `120 BPM`, a parser obsługuje zarówno ramki FTMS `0x2AD2`, jak i bezpośrednie pakiety `0x2A37`.
+## 2. User Experience & Visual Design
+
+- **Kluczowe przepływy użytkownika**:
+  - **Kokpit na Żywo (`2. Kokpit`)**:
+    - Podczas jazdy kafelek **KADENCJA** wyświetla zielony status `W CELU` (gdy odchylenie mieści się w $\pm 5\text{ RPM}$), błękitny status przy wyższej kadencji oraz **czerwony alarm (`text-rose-400`, czerwony pasek `#F43F5E`, czerwona ramka kafelka) z napisem `ZA NISKO! (+X RPM)`**, gdy kadencja spadnie poniżej celu.
+    - W momencie gdy czas ostatniego interwału osiąga `00:00`, odtwarzany jest sygnał dźwiękowy i automatycznie otwiera się okno dialogowe **„Trening ukończony! Zakończyć i zapisać sesję do pliku .FIT?”**.
+  - **Lista Zakończonych Jazd (`3. Postępy i FIT`)**:
+    - Na karcie każdej jazdy widoczny jest rzeczywisty dystans w `km` oraz średnia prędkość w `km/h` wyliczona z koła 700c.
+    - Obok przycisków eksportu znajduje się przycisk **„Usuń”** (ikona kosza z potwierdzeniem usunięcia z urządzenia i chmury Firebase).
+    - Jeśli Google Fit zwróci błąd `403`, wyświetlana jest czytelna karta pomocnicza z bezpośrednim linkiem **„Włącz Google Fitness API w projekcie 782546220198”** oraz przyciskiem **„Wyłącz Google Fit w moim profilu”**.
+  - **Aktualizacja PWA z GitHub Pages**:
+    - Na górnym pasku nawigacji oraz w zakładce **5. Chmura Firebase** dostępny jest przycisk **„Aktualizuj Apkę”** (ikona odświeżania), który sprawdza i instaluje najnowszą wersję z GitHub Pages bez utraty połączenia z Firebase.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decyzja 1: Fizyka prędkości i drogi z obwodu koła 700c (`2.105 m`) i czasu ($\Delta t = 1\text{ s}$)**
+  - *Wybrane podejście*:
+    - Obwód standardowego koła szosowego 700c (28 cali, opona 700×25c): $C = 2.105\text{ m}$.
+    - Liczba obrotów na sekundę: $\text{RPS} = \frac{\text{RPM}}{60}$.
+    - Prędkość w $\text{m/s}$: $v_{\text{m/s}} = \frac{\text{RPM}}{60} \times 2.105$.
+    - Prędkość w $\text{km/h}$: $v_{\text{km/h}} = v_{\text{m/s}} \times 3.6 = \text{RPM} \times 0.1263$.
+    - Przyrost drogi w każdej sekundzie jazdy ($\Delta t_{\text{h}} = \frac{1}{3600}\text{ h}$):
+      $$\Delta d_{\text{km}} = v_{\text{km/h}} \times \frac{\Delta t_{\text{s}}}{3600} \quad\Longleftrightarrow\quad \Delta d_{\text{m}} = v_{\text{m/s}} \times \Delta t_{\text{s}}$$
+  - *Dlaczego*: Wcześniej funkcja `ingestTelemetry` dodawała przyrost drogi przy każdym pakiecie BLE (`0x2AD2`), które rower wysyła 3–4 razy na sekundę, oraz pobierała surowy licznik z konsoli roweru, co sztucznie mnożyło dystans do 74 km/h. Zliczanie drogi ściśle z 1-sekundowego zegara treningowego ($\Delta t$) i obwodu koła 700c daje stuprocentową zgodność matematyczną ($d = v \times t$).
+
+- **Decyzja 2: Firebase Cloud Firestore jako jedyne źródło prawdy o synchronizacji zewnętrznej**
+  - *Wybrane podejście*: Po każdym udanym wysłaniu pliku `.FIT` do Intervals.icu lub sesji do Google Fit aplikacja natychmiast wywołuje `updateCompletedActivitySyncStatusInFirestore()`, zapisując `syncedToIntervals: true`, `intervalsActivityId` oraz `syncedToGoogleFit: true` w dokumencie `/completedWorkouts/{id}` w Firebase (oraz logując zdarzenie w `/securityAuditLogs`).
+  - *Dlaczego*: Po wyczyszczeniu danych przeglądarki lub otwarciu aplikacji na nowo `localStorage` jest pusty, ale Firebase zwraca dokumenty z `syncedToIntervals: true`. Zablokowanie pętli Auto-Sync do momentu odebrania pierwszego snapshotu z Firestore (`firestoreActivitiesLoaded = true`) oraz rejestr wysłanych ID (`inFlightIntervalsSyncIds`) całkowicie eliminuje wielokrotne wysyłanie tego samego treningu do Intervals.icu.
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   1Hz WORKOUT TIMER & 700c WHEEL MODULE                    │
+│  • RPM -> RPS = RPM / 60 -> Speed (m/s) = RPS * 2.105m -> km/h = m/s * 3.6 │
+│  • Distance (m) += Speed (m/s) * deltaSec (strictly 1x per elapsed second) │
+│  • When last block reaches 00:00 -> auto-open Finish Workout Modal         │
+└─────────────────────────────────────┬──────────────────────────────────────┘
+                                      │
+                                      ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│             FIREBASE CLOUD FIRESTORE (/completedWorkouts/{id})             │
+│  • Stores: syncedToIntervals, intervalsActivityId, syncedToGoogleFit       │
+│  • Auto-Sync waits for initial Firestore snapshot before checking queue    │
+│  • Delete Completed Workout removes from State + OPFS + Firestore          │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Mapowanie interakcji i stanu
+1. **Automatyczne okno zakończenia po ostatnim interwale**:
+   - W `App.tsx` (pętla 1Hz) gdy `nextSec >= block.durationSec` na ostatnim odcinku (`blkIdx + 1 >= workout.blocks.length`), ustawiana jest flaga `autoPromptFinishRide = true`, która automatycznie otwiera modal potwierdzenia zakończenia treningu w `LiveCockpitView`.
+2. **Usuwanie wykonanych treningów**:
+   - Nowa funkcja `deleteCompletedActivityEverywhere(activity)` w `firebaseSyncService.ts` usuwa dokument `completedWorkouts/{activity.id}` z Firestore, kasuje pliki `.fit` oraz `.json` z katalogu `/User_Data/{profileId}` w `OPFS` i aktualizuje `profile_state.json`.
+3. **Aktualizator PWA (`forceUpdatePwaFromGitHub`)**:
+   - Wywołuje `navigator.serviceWorker.getRegistrations()`, dla każdej rejestracji uruchamia `reg.update()` i `reg.waiting?.postMessage({ type: 'SKIP_WAITING' })`, czyści pamięci podręczne `caches.keys()` i przeładowuje okno z najnowszym buildem z GitHub Pages.

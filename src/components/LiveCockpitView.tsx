@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Volume2,
   VolumeX,
@@ -69,6 +69,8 @@ interface LiveCockpitViewProps {
   onExtendCurrentBlockSec?: (deltaSec: number) => void;
   isFocusHudMode?: boolean;
   onToggleFocusHudMode?: () => void;
+  autoShowFinishConfirm?: boolean;
+  onDismissAutoFinishConfirm?: () => void;
 }
 
 export function formatDurationClock(totalSec: number): string {
@@ -116,9 +118,18 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
   onExtendCurrentBlockSec,
   isFocusHudMode = false,
   onToggleFocusHudMode,
+  autoShowFinishConfirm = false,
+  onDismissAutoFinishConfirm,
 }) => {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [isSnifferModalOpen, setIsSnifferModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (autoShowFinishConfirm) {
+      setShowFinishConfirm(true);
+    }
+  }, [autoShowFinishConfirm]);
+
   const hrSourceBadge = getHrSourceBadgeInfo(telemetry);
 
   const safeBlockIndex = Math.min(
@@ -627,10 +638,22 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           </div>
         </div>
 
-        {/* FIELD 4: CADENCE (RPM) + TARGET CADENCE GAUGE */}
-        <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3.5 py-2 sm:py-2.5 flex flex-col justify-between min-w-0 overflow-hidden">
-          <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase min-w-0">
-            <span className="truncate">KADENCJA</span>
+        {/* FIELD 4: CADENCE (RPM) + TARGET CADENCE GAUGE (RED ALERT WHEN TOO LOW) */}
+        <div
+          className={`rounded-xl px-2.5 sm:px-3.5 py-2 sm:py-2.5 flex flex-col justify-between min-w-0 overflow-hidden transition-colors border ${
+            cadenceDelta < -5
+              ? 'bg-rose-950/25 border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.18)]'
+              : 'bg-[#131B26] border-slate-800'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider uppercase min-w-0">
+            <span
+              className={`truncate ${
+                cadenceDelta < -5 ? 'text-rose-400 font-extrabold' : 'text-slate-400'
+              }`}
+            >
+              {cadenceDelta < -5 ? 'KADENCJA ZA NISKA!' : 'KADENCJA'}
+            </span>
             <span className="font-mono-tabular text-sky-400 shrink-0">
               CEL {targetCadenceRpm} RPM
             </span>
@@ -638,24 +661,34 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 
           <div className="my-auto py-0.5 flex items-baseline justify-between gap-1 min-w-0">
             <div className="flex items-baseline gap-1 min-w-0">
-              <span className="font-mono-tabular text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-none truncate">
+              <span
+                className={`font-mono-tabular text-3xl sm:text-5xl font-extrabold tracking-tight leading-none truncate ${
+                  cadenceDelta < -5 ? 'text-rose-400' : 'text-white'
+                }`}
+              >
                 {telemetry.cadenceRpm}
               </span>
-              <span className="text-[11px] sm:text-xs font-bold text-sky-400 shrink-0">RPM</span>
+              <span
+                className={`text-[11px] sm:text-xs font-bold shrink-0 ${
+                  cadenceDelta < -5 ? 'text-rose-400' : 'text-sky-400'
+                }`}
+              >
+                RPM
+              </span>
             </div>
             <span
-              className={`font-mono-tabular text-[10px] sm:text-xs font-bold shrink-0 ${
+              className={`font-mono-tabular text-[10px] sm:text-xs font-extrabold shrink-0 ${
                 Math.abs(cadenceDelta) <= 5
                   ? 'text-emerald-400'
                   : cadenceDelta < -5
-                  ? 'text-amber-400'
+                  ? 'text-rose-400'
                   : 'text-sky-400'
               }`}
             >
               {Math.abs(cadenceDelta) <= 5
                 ? 'W CELU'
                 : cadenceDelta < -5
-                ? `+${Math.abs(cadenceDelta)} RPM`
+                ? `ZA NISKO (+${Math.abs(cadenceDelta)} RPM)`
                 : `-${cadenceDelta} RPM`}
             </span>
           </div>
@@ -678,7 +711,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
                     Math.abs(cadenceDelta) <= 5
                       ? '#10B981'
                       : cadenceDelta < -5
-                      ? '#F59E0B'
+                      ? '#F43F5E'
                       : '#38BDF8',
                 }}
               />
@@ -692,7 +725,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           </div>
         </div>
 
-        {/* FIELD 5: TOTAL WORKOUT TIME (PROGRESSIVE) */}
+        {/* FIELD 5: TOTAL WORKOUT TIME + 700c SPEED & DISTANCE */}
         <div className="rounded-xl bg-[#131B26] border border-slate-800 px-2.5 sm:px-3.5 py-2 sm:py-2.5 flex flex-col justify-between min-w-0 overflow-hidden">
           <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase min-w-0">
             <span className="truncate">CZAS JAZDY</span>
@@ -701,9 +734,15 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
             </span>
           </div>
 
-          <div className="my-auto py-0.5 flex items-baseline gap-1 min-w-0">
+          <div className="my-auto py-0.5 flex items-baseline justify-between gap-1 min-w-0">
             <span className="font-mono-tabular text-2xl sm:text-5xl font-extrabold tracking-tight text-white leading-none truncate">
               {formatDurationClock(elapsedWorkoutSec)}
+            </span>
+            <span
+              className="font-mono-tabular text-[11px] sm:text-xs font-bold text-emerald-400 shrink-0"
+              title="Dystans wyliczony z obrotów koła szosowego 700c (2.105m) w czasie jazdy"
+            >
+              {(telemetry.distanceMeters / 1000).toFixed(2)} km
             </span>
           </div>
 
@@ -713,6 +752,9 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
               <strong className="text-slate-200">
                 {nextBlock ? nextBlock.label : 'Koniec'}
               </strong>
+            </span>
+            <span className="font-mono-tabular text-sky-400 font-semibold shrink-0">
+              {telemetry.speedKmh.toFixed(1)} km/h
             </span>
           </div>
         </div>
@@ -878,22 +920,43 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
         </button>
       </div>
 
-      {/* CONFIRMATION DIALOG BEFORE ENDING WORKOUT */}
+      {/* CONFIRMATION DIALOG BEFORE ENDING WORKOUT (OR AUTO-PROPOSED AFTER FINAL INTERVAL) */}
       {showFinishConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-[#131B26] border border-slate-700 p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-2.5 text-amber-400">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
+          <div className="w-full max-w-sm rounded-2xl bg-[#131B26] border border-emerald-500/50 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-2.5 text-emerald-400">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
               <h3 className="text-base font-bold text-white">
-                Zakończyć trening?
+                {autoShowFinishConfirm
+                  ? 'Trening ukończony! Zapisać sesję?'
+                  : 'Zakończyć trening?'}
               </h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed break-words">
-              Czy na pewno chcesz zakończyć trening <strong>{workout.name}</strong> ({formatDurationClock(elapsedWorkoutSec)}) i zapisać sesję do pliku <code>.FIT</code>?
+              {autoShowFinishConfirm ? (
+                <>
+                  Ostatni interwał treningu <strong>{workout.name}</strong> (
+                  {formatDurationClock(elapsedWorkoutSec)},{' '}
+                  {(telemetry.distanceMeters / 1000).toFixed(2)} km) dobiegł
+                  końca! Czy chcesz zakończyć trening i zapisać plik{' '}
+                  <code>.FIT</code> w Firebase, OPFS i Intervals.icu?
+                </>
+              ) : (
+                <>
+                  Czy na pewno chcesz zakończyć trening{' '}
+                  <strong>{workout.name}</strong> (
+                  {formatDurationClock(elapsedWorkoutSec)},{' '}
+                  {(telemetry.distanceMeters / 1000).toFixed(2)} km) i zapisać
+                  sesję do pliku <code>.FIT</code>?
+                </>
+              )}
             </p>
             <div className="grid grid-cols-2 gap-2.5 pt-1">
               <button
-                onClick={() => setShowFinishConfirm(false)}
+                onClick={() => {
+                  setShowFinishConfirm(false);
+                  onDismissAutoFinishConfirm?.();
+                }}
                 className="min-h-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition-colors"
               >
                 Wróć do jazdy
@@ -901,11 +964,12 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
               <button
                 onClick={() => {
                   setShowFinishConfirm(false);
+                  onDismissAutoFinishConfirm?.();
                   onStopAndFinish();
                 }}
-                className="min-h-[44px] rounded-xl bg-rose-500 hover:bg-rose-400 text-xs font-bold text-slate-950 transition-colors"
+                className="min-h-[44px] rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-extrabold text-slate-950 transition-colors"
               >
-                Tak, zakończ
+                Zakończ i zapisz .FIT
               </button>
             </div>
           </div>

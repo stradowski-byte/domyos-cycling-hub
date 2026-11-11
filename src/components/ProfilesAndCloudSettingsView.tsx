@@ -295,6 +295,9 @@ export const ProfilesAndCloudSettingsView: React.FC<
 
   const handleForceSwUpdate = async () => {
     try {
+      onNotifyToast?.(
+        'Pobieram najnowszą wersję aplikacji z GitHub Pages i odświeżam pamięć podręczną PWA...'
+      );
       if ('serviceWorker' in navigator) {
         const regs = await navigator.serviceWorker.getRegistrations();
         for (const reg of regs) {
@@ -304,10 +307,11 @@ export const ProfilesAndCloudSettingsView: React.FC<
           }
         }
       }
-      onNotifyToast?.(
-        'Sprawdzono aktualizacje Service Workera PWA! Przeładowuję aplikację...'
-      );
-      window.setTimeout(() => window.location.reload(), 800);
+      if ('caches' in window) {
+        const keys = await window.caches.keys();
+        await Promise.all(keys.map((k) => window.caches.delete(k)));
+      }
+      window.setTimeout(() => window.location.reload(), 650);
     } catch {
       window.location.reload();
     }
@@ -722,6 +726,16 @@ export const ProfilesAndCloudSettingsView: React.FC<
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleForceSwUpdate}
+              className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+              title="Wymuś natychmiastowe pobranie najnowszego commitu z GitHub Pages i przeładuj aplikację PWA"
+            >
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span>Aktualizuj Apkę (Pobierz z GitHub)</span>
+            </button>
+
             <a
               href={ghPagesUrl}
               target="_blank"
@@ -729,7 +743,7 @@ export const ProfilesAndCloudSettingsView: React.FC<
               className="min-h-[42px] px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
             >
               <ExternalLink className="w-4 h-4 shrink-0" />
-              <span>Otwórz GitHub Pages (Zainstaluj Apkę)</span>
+              <span>Otwórz GitHub Pages</span>
             </a>
 
             <button

@@ -842,6 +842,126 @@ export async function saveCompletedActivityToFirestore(
   }
 }
 
+/**
+ * Persists external sync status (`syncedToIntervals`, `intervalsActivityId`, `syncedToGoogleFit`, `googleFitSessionId`)
+ * directly into the central Firebase Cloud Firestore `/completedWorkouts/{activityId}` document
+ * so clearing browser cache or restarting the app never causes duplicate uploads to Intervals.icu or Google Fit.
+ */
+export async function updateCompletedActivityExternalSyncInFirestore(
+  activityId: string,
+  patch: {
+    syncedToIntervals?: boolean;
+    intervalsActivityId?: string;
+    syncedToGoogleFit?: boolean;
+    googleFitSessionId?: string;
+  }
+): Promise<void> {
+  const payload = sanitizeForFirestore({
+    ...patch,
+    updatedAtIso: new Date().toISOString(),
+  }) as unknown as Record<string, unknown>;
+
+  recordPrivateAuditLog(
+    'INFO',
+    'FIRESTORE',
+    `Zapis statusu synchronizacji zewnętrznej dla treningu ${activityId} w Firebase`,
+    JSON.stringify(patch)
+  );
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activityId,
+      op: 'set',
+      payload,
+    });
+    return;
+  }
+
+  if (!db || !auth?.currentUser) return;
+  const path = `completedWorkouts/${activityId}`;
+  try {
+    await setDoc(doc(db, 'completedWorkouts', activityId), payload, {
+      merge: true,
+    });
+  } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activityId,
+      op: 'set',
+      payload,
+    });
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Deletes a completed workout activity from local OPFS (.FIT + 1Hz Telemetry_JSON)
+ * AND from the central Firebase Cloud Firestore `/completedWorkouts/{activity.id}` collection.
+ */
+export async function deleteCompletedActivityEverywhere(
+  activity: CompletedActivity
+): Promise<void> {
+  // 1. Remove local OPFS files (.FIT and .json telemetry)
+  try {
+    const tree = await getOrCreateOpfsTree(undefined, [activity.profileId]);
+    if (tree) {
+      const datePart = activity.startedAtIso.slice(0, 10);
+      const cleanName = activity.workoutName
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 32);
+      const fitFileName = `${datePart}_${cleanName}.fit`;
+
+      for (const branch of Object.values(tree.userDataDirs)) {
+        try {
+          await branch.fitDir.removeEntry(fitFileName);
+        } catch {
+          // ignore if not in this folder
+        }
+        try {
+          await branch.telemetryDir.removeEntry(`${activity.id}.json`);
+        } catch {
+          // ignore if not in this folder
+        }
+      }
+    }
+  } catch {
+    // ignore OPFS removal errors
+  }
+
+  recordPrivateAuditLog(
+    'INFO',
+    'FIRESTORE',
+    `Usunięto wykonany trening "${activity.workoutName}" (${activity.id}) z OPFS i Firebase`
+  );
+
+  // 2. Delete from Firebase Cloud Firestore (or queue deletion if offline)
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activity.id,
+      op: 'delete',
+    });
+    return;
+  }
+
+  if (!db || !auth?.currentUser) return;
+  const path = `completedWorkouts/${activity.id}`;
+  try {
+    await deleteDoc(doc(db, 'completedWorkouts', activity.id));
+  } catch (err) {
+    enqueueOfflineFirestoreMutation({
+      collectionName: 'completedWorkouts',
+      docId: activity.id,
+      op: 'delete',
+    });
+    handleFirestoreError(err, OperationType.DELETE, path);
+    throw err;
+  }
+}
+
 export async function syncAllStateToFirestore(params: {
   profiles: Record<ProfileId, AthleteProfile>;
   workouts: StructuredWorkout[];
@@ -1120,7 +1240,6 @@ export function subscribeToFirestoreHub(callbacks: {
       where('ownerUid', '==', currentUid)
     ),
     (snap) => {
-      if (snap.empty) return;
       const list: CompletedActivity[] = [];
       snap.forEach((d) => {
         const a = d.data() as CompletedActivity;
@@ -1132,9 +1251,7 @@ export function subscribeToFirestoreHub(callbacks: {
         (a, b) =>
           new Date(b.startedAtIso).getTime() - new Date(a.startedAtIso).getTime()
       );
-      if (list.length > 0) {
-        callbacks.onActivitiesSnapshot(list);
-      }
+      callbacks.onActivitiesSnapshot(list);
     },
     (err) => handleFirestoreError(err, OperationType.LIST, 'completedWorkouts')
   );
