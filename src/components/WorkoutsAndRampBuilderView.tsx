@@ -144,6 +144,8 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
     formatBlocksToIntervalsText(blocks)
   );
   const [showTextEditor, setShowTextEditor] = useState(false);
+  const [showShortRecDetails, setShowShortRecDetails] = useState(false);
+  const [showStandardRecDetails, setShowStandardRecDetails] = useState(false);
 
   // Combine configured tags with any custom tags found on workouts
   const allCategoryTags = useMemo(() => {
@@ -638,8 +640,8 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* OPTION 1: SHORT / TIME-CRUNCHED WORKOUT (30-45 MIN) */}
-            <div className="rounded-xl bg-[#0B0F17] border border-emerald-500/40 p-3.5 flex flex-col justify-between gap-3 min-w-0">
-              <div className="space-y-1.5 min-w-0">
+            <div className="rounded-xl bg-[#0B0F17] border border-emerald-500/40 p-3.5 flex flex-col justify-between gap-2.5 min-w-0">
+              <div className="space-y-2 min-w-0">
                 <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 font-bold text-emerald-300">
                     WARIANT 1 · KRÓTKI (30–45 MIN)
@@ -660,6 +662,41 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 <p className="text-xs text-slate-300 leading-relaxed break-words">
                   {smartDailyRecommendations.shortOption.subtitle}
                 </p>
+
+                {/* Collapsible Dropdown Trigger for Visual Profile & Detailed Description */}
+                <button
+                  type="button"
+                  onClick={() => setShowShortRecDetails((prev) => !prev)}
+                  className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-[#131B26] hover:bg-slate-800/80 border border-slate-800 text-xs font-semibold text-emerald-300 flex items-center justify-between gap-2 transition-colors"
+                >
+                  <span className="truncate">
+                    {showShortRecDetails
+                      ? 'Ukryj profil wizualny i szczegółowy opis'
+                      : 'Pokaż profil wizualny i szczegółowy opis'}
+                  </span>
+                  {showShortRecDetails ? (
+                    <ChevronDown className="w-4 h-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 shrink-0 text-emerald-400" />
+                  )}
+                </button>
+
+                {showShortRecDetails && (
+                  <div className="rounded-xl bg-[#131B26] border border-emerald-500/30 p-3 space-y-2.5">
+                    <WorkoutProfileChart
+                      blocks={
+                        smartDailyRecommendations.shortOption.workout.blocks
+                      }
+                      profile={activeProfile}
+                      height={105}
+                    />
+                    <p className="text-xs text-slate-200 leading-relaxed break-words">
+                      {smartDailyRecommendations.shortOption.workout
+                        .description ||
+                        smartDailyRecommendations.shortOption.subtitle}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-1">
@@ -686,8 +723,8 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
             </div>
 
             {/* OPTION 2: STANDARD / LONGER INDOOR WORKOUT (50-75 MIN, MAX 1H 20M) */}
-            <div className="rounded-xl bg-[#0B0F17] border border-sky-500/40 p-3.5 flex flex-col justify-between gap-3 min-w-0">
-              <div className="space-y-1.5 min-w-0">
+            <div className="rounded-xl bg-[#0B0F17] border border-sky-500/40 p-3.5 flex flex-col justify-between gap-2.5 min-w-0">
+              <div className="space-y-2 min-w-0">
                 <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                   <span className="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-500/40 font-bold text-sky-300">
                     WARIANT 2 · STANDARDOWY / DŁUŻSZY (50–75 MIN)
@@ -708,6 +745,41 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
                 <p className="text-xs text-slate-300 leading-relaxed break-words">
                   {smartDailyRecommendations.standardOption.subtitle}
                 </p>
+
+                {/* Collapsible Dropdown Trigger for Visual Profile & Detailed Description */}
+                <button
+                  type="button"
+                  onClick={() => setShowStandardRecDetails((prev) => !prev)}
+                  className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-[#131B26] hover:bg-slate-800/80 border border-slate-800 text-xs font-semibold text-sky-300 flex items-center justify-between gap-2 transition-colors"
+                >
+                  <span className="truncate">
+                    {showStandardRecDetails
+                      ? 'Ukryj profil wizualny i szczegółowy opis'
+                      : 'Pokaż profil wizualny i szczegółowy opis'}
+                  </span>
+                  {showStandardRecDetails ? (
+                    <ChevronDown className="w-4 h-4 shrink-0 text-sky-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 shrink-0 text-sky-400" />
+                  )}
+                </button>
+
+                {showStandardRecDetails && (
+                  <div className="rounded-xl bg-[#131B26] border border-sky-500/30 p-3 space-y-2.5">
+                    <WorkoutProfileChart
+                      blocks={
+                        smartDailyRecommendations.standardOption.workout.blocks
+                      }
+                      profile={activeProfile}
+                      height={105}
+                    />
+                    <p className="text-xs text-slate-200 leading-relaxed break-words">
+                      {smartDailyRecommendations.standardOption.workout
+                        .description ||
+                        smartDailyRecommendations.standardOption.subtitle}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-1">
