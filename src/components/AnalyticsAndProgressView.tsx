@@ -15,6 +15,8 @@ import {
   ExternalLink,
   AlertTriangle,
   X,
+  Star,
+  Brain,
 } from 'lucide-react';
 import {
   AthleteProfile,
@@ -24,10 +26,13 @@ import {
 import {
   computeDetailedHrBreakdown,
   computePeriodBestPeakPowerAndHr,
+  computePsychophysiologicalModelReport,
   computeRidePeakPowerAndHr,
   filterActivitiesByPeriod,
+  getFeelScoreVisualMeta,
 } from '../services/rampAndPhysiologyEngine';
 import { formatDurationClock } from './LiveCockpitView';
+import { PostRideFeelSelector } from './PostRideFeelSelector';
 
 interface AnalyticsAndProgressViewProps {
   profile: AthleteProfile;
@@ -41,6 +46,14 @@ interface AnalyticsAndProgressViewProps {
   onUploadToGoogleFit: (activity: CompletedActivity) => void;
   onUploadToIntervals: (activity: CompletedActivity) => void;
   onDeleteActivity?: (activity: CompletedActivity) => Promise<void> | void;
+  onUpdateActivityFeel?: (
+    activity: CompletedActivity,
+    patch: {
+      feelScore1To10: number;
+      feelSymptomTags: string[];
+      feelNotes?: string;
+    }
+  ) => Promise<void> | void;
   googleFitErrorInfo?: {
     message: string;
     enableApiUrl?: string;
@@ -62,12 +75,14 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
   onUploadToGoogleFit,
   onUploadToIntervals,
   onDeleteActivity,
+  onUpdateActivityFeel,
   googleFitErrorInfo,
   onDismissGoogleFitError,
   onToggleGoogleFitEnabled,
 }) => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [editingFeelId, setEditingFeelId] = useState<string | null>(null);
   const hasIntervalsConnected = Boolean(
     profile.intervals.enabled && profile.intervals.apiKey.trim()
   );
@@ -80,7 +95,7 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
 
   // Sub-navigation tab in Analytics ('rides_fit' is default so completed .FIT rides are immediately on top on mobile)
   const [activeSubTab, setActiveSubTab] = useState<
-    'rides_fit' | 'peak_power' | 'fitness_hr'
+    'rides_fit' | 'peak_power' | 'fitness_hr' | 'psycho_model'
   >('rides_fit');
 
   // Selected ride for "Ostatnia / Wybrana Jazda" Peak Power & HR Breakdown
@@ -142,6 +157,18 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
   );
 
   const displayedHrBreakdown = hrScope === 'last_ride' ? rideHrBreakdown : periodHrBreakdown;
+
+  // Compute Psychophysiological Model Report (Carl Foster sRPE + Banister 4-Quadrant + DALDA/Hooper)
+  const psychoReport = useMemo(
+    () =>
+      computePsychophysiologicalModelReport(
+        activities,
+        wellnessSeries,
+        profile,
+        selectedPeriod
+      ),
+    [activities, wellnessSeries, profile, selectedPeriod]
+  );
 
   const latestWellness =
     wellnessSeries.length > 0
@@ -264,8 +291,8 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
           )}
         </div>
 
-        {/* 3-Segment Sub-View Switcher (Rides & .FIT first!) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1 bg-[#0B0F17] rounded-xl border border-slate-800">
+        {/* 4-Segment Sub-View Switcher (Rides & .FIT first!) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5 p-1 bg-[#0B0F17] rounded-xl border border-slate-800">
           <button
             type="button"
             onClick={() => setActiveSubTab('rides_fit')}
@@ -276,7 +303,7 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
             }`}
           >
             <Download className="w-4 h-4 shrink-0" />
-            <span>1. Ostatnie Jazdy i Pliki .FIT ({profileActivities.length})</span>
+            <span>1. Ostatnie Jazdy i .FIT ({profileActivities.length})</span>
           </button>
 
           <button
@@ -289,7 +316,7 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
             }`}
           >
             <Zap className="w-4 h-4 shrink-0" />
-            <span>2. Krzywa Mocy i Rekordy (5s–20m)</span>
+            <span>2. Krzywa Mocy (5s–20m)</span>
           </button>
 
           <button
@@ -302,7 +329,20 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
             }`}
           >
             <Heart className="w-4 h-4 shrink-0" />
-            <span>3. Forma (CTL/ATL) i Strefy Tętna</span>
+            <span>3. Forma (CTL/ATL) i Tętno</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('psycho_model')}
+            className={`min-h-[42px] px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
+              activeSubTab === 'psycho_model'
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Brain className="w-4 h-4 shrink-0" />
+            <span>4. Fitness vs. Odczucia (Model)</span>
           </button>
         </div>
       </div>
@@ -562,6 +602,28 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
 
                         <h4 className="text-sm font-bold text-white flex flex-wrap items-center gap-2 break-words">
                           <span>{act.workoutName}</span>
+                          {act.feelScore1To10 && act.feelScore1To10 >= 1 && (
+                            <span
+                              className={`px-2 py-0.5 rounded-md border text-[11px] font-bold flex items-center gap-1 ${
+                                getFeelScoreVisualMeta(act.feelScore1To10).badgeClass
+                              }`}
+                            >
+                              <Star className="w-3 h-3 fill-current" />
+                              <span>
+                                Odczucia:{' '}
+                                {getFeelScoreVisualMeta(act.feelScore1To10).shortLabel}
+                              </span>
+                            </span>
+                          )}
+                          {act.feelSymptomTags &&
+                            act.feelSymptomTags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-semibold text-slate-300"
+                              >
+                                {tag}
+                              </span>
+                            ))}
                         </h4>
 
                         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-slate-300 font-mono-tabular pt-0.5">
@@ -601,6 +663,19 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                             </strong>
                           </span>
                         </div>
+
+                        {editingFeelId === act.id && onUpdateActivityFeel && (
+                          <div className="pt-2">
+                            <PostRideFeelSelector
+                              activity={act}
+                              compact={false}
+                              hasIntervalsConnected={hasIntervalsConnected}
+                              onUpdateFeel={async (targetAct, patch) => {
+                                await onUpdateActivityFeel(targetAct, patch);
+                              }}
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <div
@@ -614,6 +689,29 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
                           <Download className="w-4 h-4 shrink-0" />
                           <span className="truncate">Pobierz .FIT</span>
                         </button>
+
+                        {onUpdateActivityFeel && (
+                          <button
+                            onClick={() =>
+                              setEditingFeelId((prev) =>
+                                prev === act.id ? null : act.id
+                              )
+                            }
+                            className={`min-h-[40px] px-3 py-2 rounded-xl border font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors truncate ${
+                              editingFeelId === act.id
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold'
+                                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-amber-300'
+                            }`}
+                            title="Oceń samopoczucie (1–10) i wybierz szybkie tagi dla tego treningu"
+                          >
+                            <Star className="w-3.5 h-3.5 shrink-0 fill-current" />
+                            <span className="truncate">
+                              {act.feelScore1To10
+                                ? `Odczucia (${act.feelScore1To10}/10)`
+                                : 'Oceń 1–10'}
+                            </span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => {
@@ -1271,6 +1369,357 @@ export const AnalyticsAndProgressView: React.FC<AnalyticsAndProgressViewProps> =
           })}
         </div>
       </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          SUB-TAB 4: FITNESS VS. ODCZUCIA PSYCHOFIZJOLOGICZNE
+          (Carl Foster sRPE Coupling + Banister/Meeusen 4-Quadrant Matrix + DALDA)
+         ===================================================================== */}
+      {activeSubTab === 'psycho_model' && (
+        <div className="space-y-4 min-w-0">
+          {/* Top Scientific Diagnosis Card */}
+          <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-4 min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Brain className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    Naukowy Raport: Fitness (CTL/TSB) vs. Odczucia Psychofizjologiczne (1–10)
+                  </h3>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-lg border text-xs font-bold ${psychoReport.currentQuadrantBadgeColor}`}
+                  >
+                    {psychoReport.currentQuadrantTitle}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Model hybrydowy łączący <strong className="text-slate-200">Carl Foster (1998, 2001) sRPE Internal-External Load Coupling</strong>,{' '}
+                  <strong className="text-slate-200">Macierz 4 Ćwiartek Banistera &amp; Meeusena (ECSS/ACSM Overtraining Consensus)</strong> oraz skalę objawową{' '}
+                  <strong className="text-slate-200">DALDA / Hooper Index</strong>.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                  className="min-h-[38px] bg-[#0B0F17] border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="last_30_days">Ostatnie 30 dni</option>
+                  <option value="all">Cała historia profilu</option>
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      Miesiąc: {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 4 Key Psychophysiological Metrics */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5">
+                <div className="text-[11px] text-slate-400">
+                  ŚREDNIE ODCZUCIA (1–10)
+                </div>
+                <div className="font-mono-tabular text-xl sm:text-2xl font-bold text-emerald-400 mt-1">
+                  {psychoReport.avgFeelScore1To10 !== null
+                    ? `${psychoReport.avgFeelScore1To10} / 10`
+                    : '—'}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Oceniono {psychoReport.ratedRidesCount} z {psychoReport.totalRidesCount} jazd
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5">
+                <div className="text-[11px] text-slate-400">
+                  SPRZĘŻENIE FOSTERA (MOC vs FEEL)
+                </div>
+                <div
+                  className={`font-mono-tabular text-xl sm:text-2xl font-bold mt-1 ${
+                    psychoReport.fosterCouplingScore >= 75
+                      ? 'text-emerald-400'
+                      : psychoReport.fosterCouplingScore >= 55
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                >
+                  {psychoReport.fosterCouplingScore}%
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Zgodność kosztu IF/TSS z odczuciami
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5">
+                <div className="text-[11px] text-slate-400">
+                  ŚREDNIE sRPE (INTERVALS.ICU)
+                </div>
+                <div className="font-mono-tabular text-xl sm:text-2xl font-bold text-sky-400 mt-1">
+                  {psychoReport.avgSessionRpe !== null
+                    ? `${psychoReport.avgSessionRpe} / 10`
+                    : '—'}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Skala Borga CR10 (Subiektywny trud)
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5">
+                <div className="text-[11px] text-slate-400">
+                  WYDAJNOŚĆ TLENOWA (EF = NP/HR)
+                </div>
+                <div className="font-mono-tabular text-xl sm:text-2xl font-bold text-amber-400 mt-1">
+                  {psychoReport.avgEfficiencyFactor !== null
+                    ? `${psychoReport.avgEfficiencyFactor} W/bpm`
+                    : '—'}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Aktualne TSB: {latestWellness.tsb >= 0 ? `+${latestWellness.tsb}` : latestWellness.tsb}
+                </div>
+              </div>
+            </div>
+
+            {/* Scientific Diagnosis & Actionable Coaching Advice */}
+            <div className="rounded-xl bg-[#0B0F17] border border-emerald-500/30 p-4 space-y-2">
+              <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                Diagnoza Psychofizjologiczna ({periodLabel}):
+              </div>
+              <p className="text-xs sm:text-sm text-white leading-relaxed">
+                {psychoReport.scientificDiagnosis}
+              </p>
+              <p className="text-xs text-slate-300 leading-relaxed pt-1 border-t border-slate-800">
+                <strong className="text-amber-300">Rekomendacja trenerska:</strong>{' '}
+                {psychoReport.coachingRecommendation}
+              </p>
+            </div>
+          </div>
+
+          {/* 4-Quadrant Banister & Meeusen Matrix + DALDA Symptom Breakdown */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 4-Quadrant Readiness Matrix */}
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-3.5">
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  Macierz 4 Ćwiartek Gotowości (Banister TSB vs. Odczucia 1–10)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Zestawia obiektywną świeżość (TSB) z subiektywną oceną samopoczucia po jeździe.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div
+                  className={`rounded-xl border p-3.5 space-y-1 ${
+                    psychoReport.currentQuadrantId === 'flow_supercompensation'
+                      ? 'bg-emerald-950/35 border-emerald-500'
+                      : 'bg-[#0B0F17] border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-emerald-400">
+                    <span>I. Superkompensacja &amp; Flow</span>
+                    <span className="font-mono-tabular">
+                      {psychoReport.quadrantCounts.flow_supercompensation} jazd
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    TSB &ge; -4 oraz Odczucia 7–10/10
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Pełna gotowość fizjologiczna i psychiczna — najlepsze okno na rekordy mocy i interwały VO2max / Threshold.
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-xl border p-3.5 space-y-1 ${
+                    psychoReport.currentQuadrantId === 'functional_adaptation'
+                      ? 'bg-sky-950/35 border-sky-500'
+                      : 'bg-[#0B0F17] border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-sky-400">
+                    <span>II. Adaptacja Funkcjonalna</span>
+                    <span className="font-mono-tabular">
+                      {psychoReport.quadrantCounts.functional_adaptation} jazd
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    TSB &lt; -4 oraz Odczucia 7–10/10
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Wysoka tolerancja obciążenia — mimo zmęczenia w liczbach (TSB) organizm i głowa świetnie znoszą trening.
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-xl border p-3.5 space-y-1 ${
+                    psychoReport.currentQuadrantId === 'expected_fatigue'
+                      ? 'bg-amber-950/35 border-amber-500'
+                      : 'bg-[#0B0F17] border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-400">
+                    <span>III. Zmęczenie Fizjologiczne</span>
+                    <span className="font-mono-tabular">
+                      {psychoReport.quadrantCounts.expected_fatigue} jazd
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    TSB &lt; -4 oraz Odczucia 1–6/10
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Normalna reakcja na ciężki blok treningowy — zaplanuj 1–2 dni regeneracji Z1/Z2, aby wejść w superkompensację.
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-xl border p-3.5 space-y-1 ${
+                    psychoReport.currentQuadrantId === 'nfor_warning'
+                      ? 'bg-rose-950/40 border-rose-500'
+                      : 'bg-[#0B0F17] border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-rose-400">
+                    <span>IV. Rozjazd / Alarm NFOR</span>
+                    <span className="font-mono-tabular">
+                      {psychoReport.quadrantCounts.nfor_warning} jazd
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    TSB &ge; -4 oraz Odczucia 1–6/10
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Ostrzeżenie: mimo wypoczętego TSB czujesz się słabo — sygnał stresu pozatreningowego, CNS, niedoboru snu lub infekcji.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* DALDA / Hooper Symptom Frequency Breakdown */}
+            <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-3.5">
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  Profil Czynników Limitujących i Flow (Skala DALDA / Hooper)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Częstotliwość występowania wybranych tagów po jeździe wskazująca układ wymagający regeneracji.
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                {psychoReport.symptomBreakdown.map((sym) => (
+                  <div key={sym.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`font-bold ${
+                            sym.isNegative ? 'text-rose-300' : 'text-emerald-300'
+                          }`}
+                        >
+                          {sym.tagLabel}
+                        </span>
+                        <span className="text-[11px] text-slate-400 truncate">
+                          ({sym.physiologicalSystem})
+                        </span>
+                      </div>
+                      <span className="font-mono-tabular text-slate-300 shrink-0">
+                        {sym.count}× ({sym.percentageOfRatedRides}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          sym.isNegative ? 'bg-rose-500' : 'bg-emerald-500'
+                        }`}
+                        style={{
+                          width: `${Math.max(2, sym.percentageOfRatedRides)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Ride-by-Ride Comparison Table + Quick Feel Editor for Any Ride */}
+          <div className="rounded-2xl bg-[#131B26] border border-slate-800 p-4 sm:p-5 space-y-3.5 min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  Zestawienie Treningów: Twarde Dane (TSS / IF / EF / TSB) vs. Odczucia (1–10)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Każda zmiana oceny 1–10 lub tagów automatycznie zapisuje się w Firebase i aktualizuje pole <code className="font-mono-tabular">Feel (1–5)</code> oraz <code className="font-mono-tabular">RPE</code> w Intervals.icu.
+                </p>
+              </div>
+            </div>
+
+            {periodActivities.length === 0 ? (
+              <div className="rounded-xl bg-[#0B0F17] border border-slate-800 p-5 text-center text-xs text-slate-400">
+                Brak ukończonych treningów w wybranym okresie.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {periodActivities.slice(0, 12).map((act) => {
+                  const meta = getFeelScoreVisualMeta(act.feelScore1To10);
+                  const ef =
+                    act.avgHrBpm > 40 && act.normalizedPowerWatts > 0
+                      ? (act.normalizedPowerWatts / act.avgHrBpm).toFixed(2)
+                      : '—';
+                  return (
+                    <div
+                      key={act.id}
+                      className="rounded-xl bg-[#0B0F17] border border-slate-800 p-3.5 space-y-2.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <div className="text-xs sm:text-sm font-bold text-white flex flex-wrap items-center gap-2">
+                            <span>{act.workoutName}</span>
+                            <span className="text-xs font-mono-tabular text-slate-400">
+                              ({act.startedAtIso.slice(0, 16).replace('T', ' ')})
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-300 font-mono-tabular flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>
+                              NP: <strong className="text-emerald-400">{act.normalizedPowerWatts}W</strong>
+                            </span>
+                            <span>
+                              IF: <strong className="text-white">{act.intensityFactor}</strong>
+                            </span>
+                            <span>
+                              TSS: <strong className="text-amber-400">{act.tss}</strong>
+                            </span>
+                            <span>
+                              EF: <strong className="text-sky-400">{ef} W/bpm</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${meta.badgeClass}`}
+                        >
+                          {meta.label}
+                        </span>
+                      </div>
+
+                      {onUpdateActivityFeel && (
+                        <PostRideFeelSelector
+                          activity={act}
+                          compact={false}
+                          hasIntervalsConnected={hasIntervalsConnected}
+                          onUpdateFeel={onUpdateActivityFeel}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

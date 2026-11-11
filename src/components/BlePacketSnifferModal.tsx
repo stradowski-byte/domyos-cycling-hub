@@ -57,12 +57,6 @@ export function getHrSourceBadgeInfo(telemetry: LiveBikeTelemetry): {
         shortLabel: 'FTMS 0x2AD2',
         colorClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
       };
-    case 'simulator':
-      return {
-        label: 'Symulator FTMS',
-        shortLabel: 'SYMULATOR',
-        colorClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-      };
     default:
       return {
         label: 'Brak sygnału HR z roweru',

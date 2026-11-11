@@ -26,6 +26,7 @@ import {
   saveCustomFirebaseConfig,
 } from '../lib/firebase';
 import { FirebaseSetupGuideDropdown } from './FirebaseSetupGuideDropdown';
+import { forceUpdatePwaAndClearCaches } from '../services/usePWAInstall';
 
 interface PwaAndAuthGateScreenProps {
   isPwaInstalled: boolean;
@@ -107,10 +108,22 @@ export const PwaAndAuthGateScreen: React.FC<PwaAndAuthGateScreenProps> = ({
           </div>
         </div>
 
-        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-bold text-emerald-300 flex items-center gap-1 shrink-0">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>Standalone Guard</span>
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => void forceUpdatePwaAndClearCaches()}
+            className="min-h-[32px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-bold text-emerald-400 flex items-center gap-1 transition-colors"
+            title="Wymuś odświeżenie PWA: wyczyść cache Service Workera i przeładuj aplikację"
+          >
+            <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+            <span>Refresh</span>
+          </button>
+
+          <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-bold text-emerald-300 hidden sm:flex items-center gap-1 shrink-0">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Standalone Guard</span>
+          </span>
+        </div>
       </header>
 
       {/* Main 3-Step Gate Card */}

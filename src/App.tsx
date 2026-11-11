@@ -92,6 +92,7 @@ import { uploadActivityToGoogleFit } from './services/googleFitService';
 import {
   fetchIntervalsPlannedAndLibraryWorkouts,
   fetchIntervalsWellness,
+  updateIntervalsActivityFeelAndNotes,
   uploadActivityFitToIntervals,
 } from './services/intervalsIcuService';
 import { AccurateWorkoutTimer } from './services/workoutTimerWorker';
@@ -100,13 +101,18 @@ import {
   useOnlineStatus,
   usePWAInstall,
 } from './services/usePWAInstall';
-import { LiveCockpitView, formatDurationClock } from './components/LiveCockpitView';
+import {
+  InitialWorkoutFeelPayload,
+  LiveCockpitView,
+  formatDurationClock,
+} from './components/LiveCockpitView';
 import { WorkoutsAndRampBuilderView } from './components/WorkoutsAndRampBuilderView';
 import { AnalyticsAndProgressView } from './components/AnalyticsAndProgressView';
 import { AthleteProfilesView } from './components/AthleteProfilesView';
 import { ProfilesAndCloudSettingsView } from './components/ProfilesAndCloudSettingsView';
 import { FastUserSwitcherModal } from './components/FastUserSwitcherModal';
 import { PwaAndAuthGateScreen } from './components/PwaAndAuthGateScreen';
+import { PostRideFeelSelector } from './components/PostRideFeelSelector';
 
 const LS_PROFILES_KEY = 'domyos_hub_google_profile_v2';
 const LS_WORKOUTS_KEY = 'domyos_hub_workouts_v1';
@@ -478,6 +484,12 @@ export default function App() {
                   ),
                   googleFitSessionId:
                     ca.googleFitSessionId || existing?.googleFitSessionId,
+                  feelScore1To10:
+                    ca.feelScore1To10 ?? existing?.feelScore1To10,
+                  feelSymptomTags:
+                    ca.feelSymptomTags || existing?.feelSymptomTags,
+                  feelNotes:
+                    ca.feelNotes || existing?.feelNotes,
                   records:
                     existing?.records &&
                     existing.records.length > (ca.records?.length || 0)
@@ -577,8 +589,7 @@ export default function App() {
 
         // Record 1Hz telemetry samples (catching up if app was in background on Android)
         // Speed (km/h) & Distance (m) are computed strictly from rotations/sec (RPM/60) * 700c wheel (2.105m) * 1s
-        const effectiveCadenceRpm =
-          bike.cadenceRpm || (bike.isSimulator ? 88 : 0);
+        const effectiveCadenceRpm = bike.cadenceRpm || 0;
         const wheel1Hz = calculate700cWheelSpeedAndDistance(
           effectiveCadenceRpm,
           1
@@ -598,7 +609,7 @@ export default function App() {
             targetPowerWatts: targetWatts,
             externalPowerWatts: bike.externalPowerWatts ?? undefined,
             powerMatchOffsetWatts: bike.powerMatchOffsetWatts,
-            heartRateBpm: bike.heartRateBpm || (bike.isSimulator ? 125 : 0),
+            heartRateBpm: bike.heartRateBpm || 0,
             cadenceRpm: effectiveCadenceRpm,
             speedKmh: wheel1Hz.speedKmh,
             distanceMeters: Math.round(rideDistanceMetersRef.current),
@@ -646,10 +657,11 @@ export default function App() {
   // Handlers for Cockpit Transport
   const handleStartOrResume = async () => {
     if (!telemetry.connected) {
-      ftmsController.startSimulator();
-      showToast(
-        'Uruchomiono symulator Domyos FTMS (możesz w każdej chwili połączyć prawdziwy rower Bluetooth).'
-      );
+      const res = await ftmsController.connectDomyosBle();
+      showToast(res.message);
+      if (!res.ok) {
+        return;
+      }
     }
 
     setAutoShowFinishConfirm(false);
@@ -688,7 +700,9 @@ export default function App() {
     setIsPaused(true);
   };
 
-  const handleStopAndFinish = async () => {
+  const handleStopAndFinish = async (
+    initialFeel?: InitialWorkoutFeelPayload
+  ) => {
     setIsRunning(false);
     setIsPaused(false);
     await audioAndWakeLock.releaseWakeLock();
@@ -705,21 +719,28 @@ export default function App() {
               powerWatts: telemetry.powerWatts || 150,
               targetPowerWatts: telemetry.targetPowerWatts || 150,
               powerMatchOffsetWatts: 0,
-              heartRateBpm: telemetry.heartRateBpm || (telemetry.isSimulator ? 130 : 0),
-              cadenceRpm: telemetry.cadenceRpm || 88,
-              speedKmh: telemetry.speedKmh || 28.5,
-              distanceMeters: Math.max(100, telemetry.distanceMeters),
+              heartRateBpm: telemetry.heartRateBpm || 0,
+              cadenceRpm: telemetry.cadenceRpm || 0,
+              speedKmh: telemetry.speedKmh || 0,
+              distanceMeters: Math.max(0, telemetry.distanceMeters),
               resistanceLevel: telemetry.resistanceLevel || 8,
             },
           ];
 
-    const summary = calculateActivitySummary(
+    const rawSummary = calculateActivitySummary(
       activeProfile,
       currentWorkout.name,
       currentWorkout.id,
       rideStartedAtIso || new Date().toISOString(),
       recordsToSave
     );
+
+    const summary: CompletedActivity = {
+      ...rawSummary,
+      feelScore1To10: initialFeel?.feelScore1To10,
+      feelSymptomTags: initialFeel?.feelSymptomTags,
+      feelNotes: initialFeel?.feelNotes,
+    };
 
     // 1. Always save binary .FIT + 1Hz Telemetry_JSON + fitBase64 into local OPFS first!
     const localOpfsRes = await saveCompletedRideAndStateToLocalOpfs(
@@ -1178,6 +1199,41 @@ export default function App() {
         err?.message ||
           'Usunięto trening lokalnie (zostanie usunięty z Firebase po połączeniu).'
       );
+    }
+  };
+
+  const handleUpdateActivityFeel = async (
+    activity: CompletedActivity,
+    patch: {
+      feelScore1To10: number;
+      feelSymptomTags: string[];
+      feelNotes?: string;
+    }
+  ) => {
+    const updatedActivity: CompletedActivity = {
+      ...activity,
+      feelScore1To10: patch.feelScore1To10,
+      feelSymptomTags: patch.feelSymptomTags,
+      feelNotes: patch.feelNotes,
+    };
+
+    setActivities((prev) =>
+      prev.map((a) => (a.id === activity.id ? { ...a, ...patch } : a))
+    );
+    setJustFinishedActivity((prev) =>
+      prev && prev.id === activity.id ? { ...prev, ...patch } : prev
+    );
+
+    await updateCompletedActivityExternalSyncInFirestore(activity.id, patch);
+
+    const prof = profiles[activity.profileId] || activeProfile;
+    if (prof?.intervals?.enabled && prof?.intervals?.apiKey?.trim()) {
+      if (updatedActivity.intervalsActivityId) {
+        await updateIntervalsActivityFeelAndNotes(
+          prof.intervals,
+          updatedActivity
+        ).catch(() => {});
+      }
     }
   };
 
@@ -1683,11 +1739,11 @@ export default function App() {
 
           <button
             onClick={handleForceUpdatePwa}
-            className="min-h-[34px] sm:min-h-[36px] px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] sm:text-xs font-semibold text-emerald-400 flex items-center gap-1 transition-colors"
-            title="Pobierz najnowszą wersję aplikacji z GitHub Pages i przeładuj Service Worker PWA"
+            className="min-h-[34px] sm:min-h-[36px] px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] sm:text-xs font-semibold text-emerald-400 flex items-center gap-1 transition-colors shrink-0"
+            title="Wymuś odświeżenie PWA: wyczyść cache Service Workera i przeładuj aplikację"
           >
             <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden lg:inline">Aktualizuj</span>
+            <span>Refresh</span>
           </button>
 
           <button
@@ -2015,16 +2071,6 @@ export default function App() {
               const res = await ftmsController.connectDomyosBle();
               showToast(res.message);
             }}
-            onToggleSimulator={() => {
-              if (telemetry.isSimulator) {
-                ftmsController.stopSimulator();
-                ftmsController.disconnectBle();
-                showToast('Wyłączono symulator FTMS.');
-              } else {
-                ftmsController.startSimulator();
-                showToast('Włączono symulator roweru Domyos Challenge Bike.');
-              }
-            }}
             onConnectExternalPower={async () => {
               const res = await ftmsController.connectExternalPowerMeter();
               showToast(res.message);
@@ -2137,6 +2183,7 @@ export default function App() {
             onUploadToGoogleFit={handleUploadSingleActivityToGoogleFit}
             onUploadToIntervals={handleUploadActivityToIntervals}
             onDeleteActivity={handleDeleteCompletedActivity}
+            onUpdateActivityFeel={handleUpdateActivityFeel}
             googleFitErrorInfo={googleFitErrorInfo}
             onDismissGoogleFitError={() => setGoogleFitErrorInfo(null)}
             onToggleGoogleFitEnabled={handleToggleGoogleFitEnabled}
@@ -2249,6 +2296,17 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* POST-RIDE SUBJECTIVE FEEL (1–10) & DALDA SYMPTOM TAGS SELECTOR */}
+            <PostRideFeelSelector
+              activity={justFinishedActivity}
+              compact={false}
+              hasIntervalsConnected={Boolean(
+                activeProfile.intervals.enabled &&
+                  activeProfile.intervals.apiKey.trim()
+              )}
+              onUpdateFeel={handleUpdateActivityFeel}
+            />
 
             {googleFitErrorInfo && (
               <div className="rounded-2xl bg-rose-950/35 border border-rose-500/60 p-3.5 space-y-2.5 text-xs">

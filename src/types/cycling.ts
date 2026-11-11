@@ -169,6 +169,10 @@ export interface CompletedActivity {
   /** Google Fit REST API sync status */
   syncedToGoogleFit?: boolean;
   googleFitSessionId?: string;
+  /** Subjective Post-Ride Feel (1 = very weak/exhausted, 10 = great/flow) & DALDA/Hooper tags */
+  feelScore1To10?: number;
+  feelSymptomTags?: string[];
+  feelNotes?: string;
 }
 
 export type ControlMode = 'erg_watts' | 'resistance_level';
@@ -178,8 +182,7 @@ export type HrSourceType =
   | 'bike_ftms'
   | 'bike_hr_service'
   | 'external_strap'
-  | 'custom_byte_offset'
-  | 'simulator';
+  | 'custom_byte_offset';
 
 export interface BleRawPacketSample {
   id: string;
@@ -213,7 +216,6 @@ export interface LiveBikeTelemetry {
   reconnecting?: boolean;
   reconnectAttempt?: number;
   deviceName: string;
-  isSimulator: boolean;
   externalPowerConnected: boolean;
   externalPowerDeviceName: string;
   externalHrConnected?: boolean;
@@ -290,3 +292,60 @@ export interface HrBreakdownSummary {
   efficiencyFactor: number | null;
   zones: HrZoneDetailedStat[];
 }
+
+export type PsychophysiologicalQuadrantId =
+  | 'flow_supercompensation'
+  | 'functional_adaptation'
+  | 'expected_fatigue'
+  | 'nfor_warning';
+
+export interface DaldaSymptomCategoryStat {
+  id: string;
+  tagLabel: string;
+  physiologicalSystem: string;
+  count: number;
+  percentageOfRatedRides: number;
+  isNegative: boolean;
+  scientificAdvice: string;
+}
+
+export interface PsychophysiologicalRidePoint {
+  activityId: string;
+  dateStr: string;
+  startedAtIso: string;
+  workoutName: string;
+  feelScore1To10: number;
+  intervalsFeel1To5: number;
+  sessionRpe1To10: number;
+  sRpeLoadAu: number;
+  tss: number;
+  intensityFactor: number;
+  efficiencyFactor: number | null;
+  tsbAtRide: number;
+  ctlAtRide: number;
+  quadrantId: PsychophysiologicalQuadrantId;
+  quadrantTitle: string;
+  tags: string[];
+  notes?: string;
+}
+
+export interface PsychophysiologicalModelReport {
+  ratedRidesCount: number;
+  totalRidesCount: number;
+  avgFeelScore1To10: number | null;
+  avgSessionRpe: number | null;
+  avgEfficiencyFactor: number | null;
+  /** Foster Coupling Score (0-100): high when subjective feel matches or exceeds objective workload */
+  fosterCouplingScore: number;
+  currentQuadrantId: PsychophysiologicalQuadrantId;
+  currentQuadrantTitle: string;
+  currentQuadrantSubtitle: string;
+  currentQuadrantBadgeColor: string;
+  scientificDiagnosis: string;
+  coachingRecommendation: string;
+  quadrantCounts: Record<PsychophysiologicalQuadrantId, number>;
+  symptomBreakdown: DaldaSymptomCategoryStat[];
+  dominantLimiter: DaldaSymptomCategoryStat | null;
+  ridePoints: PsychophysiologicalRidePoint[];
+}
+

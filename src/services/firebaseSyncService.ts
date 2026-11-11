@@ -853,6 +853,9 @@ export async function updateCompletedActivityExternalSyncInFirestore(
     intervalsActivityId?: string;
     syncedToGoogleFit?: boolean;
     googleFitSessionId?: string;
+    feelScore1To10?: number;
+    feelSymptomTags?: string[];
+    feelNotes?: string;
   }
 ): Promise<void> {
   const payload = sanitizeForFirestore({

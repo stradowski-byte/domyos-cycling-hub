@@ -1,6 +1,7 @@
 import {
   AthleteProfile,
   CompletedActivity,
+  DaldaSymptomCategoryStat,
   HeartRateZone,
   HrBreakdownSummary,
   HrZoneDetailedStat,
@@ -8,6 +9,9 @@ import {
   PeakPowerWindowStat,
   PowerZone,
   ProfileId,
+  PsychophysiologicalModelReport,
+  PsychophysiologicalQuadrantId,
+  PsychophysiologicalRidePoint,
   RampCurveType,
   StructuredWorkout,
   TelemetryRecord,
@@ -1796,5 +1800,420 @@ export function estimateSuggestedFtpFromHistory(
 
   return bestCandidate;
 }
+
+// ============================================================================
+// PSYCHOPHYSIOLOGICAL FEEL (1–10), DALDA/HOOPER TAGS & FITNESS VS FEEL MODEL
+// (Foster 1998/2001 sRPE Coupling + Banister/Meeusen ECSS 4-Quadrant Matrix)
+// ============================================================================
+
+export interface PostRideFeelTagDefinition {
+  id: string;
+  label: string;
+  physiologicalSystem: string;
+  isNegative: boolean;
+  scientificAdvice: string;
+}
+
+export const POST_RIDE_NEGATIVE_FEEL_TAGS: PostRideFeelTagDefinition[] = [
+  {
+    id: 'heavy_legs',
+    label: 'Ciężkie nogi',
+    physiologicalSystem: 'Układ obwodowy / Mięśniowo-glikogenowy',
+    isNegative: true,
+    scientificAdvice:
+      'Dominują mikrouszkodzenia włókien mięśniowych lub lokalna deplecja glikogenu. W kolejnej sesji utrzymaj wyższą kadencję (>90 RPM) w Z1/Z2 i uzupełnij węglowodany (60–80 g/h).',
+  },
+  {
+    id: 'hard_breathing',
+    label: 'Ciężko się oddychało',
+    physiologicalSystem: 'Układ krążeniowo-oddechowy / Dryf tętna',
+    isNegative: true,
+    scientificAdvice:
+      'Podwyższony koszt wentylacyjny i dryf sercowo-naczyniowy (Cardiac Drift). Zadbaj o nawodnienie, elektrolity oraz chłodzenie nawiewem podczas jazdy stacjonarnej.',
+  },
+  {
+    id: 'mental_breakdown',
+    label: 'Załamanie mentalne',
+    physiologicalSystem: 'Ośrodkowy Układ Nerwowy (CNS) / Psychologia',
+    isNegative: true,
+    scientificAdvice:
+      'Przeciążenie ośrodkowego układu nerwowego (Central Fatigue wg modelu Noakesa/Marcora). Unikaj długich, monotonnych bloków progowych — wybierz krótką zabawę rytmem (30–35 min) lub dzień wolny.',
+  },
+  {
+    id: 'no_energy_overreached',
+    label: 'Brak sił / Przemęczenie',
+    physiologicalSystem: 'Układ autonomiczny (ANS) / Deplecja systemowa',
+    isNegative: true,
+    scientificAdvice:
+      'Systemowe wyczerpanie energetyczne i układ współczulny w stresie (Hooper Index). Zredukuj objętość o 40–50% przez 48h, priorytetyzuj sen i regenerację Z1.',
+  },
+];
+
+export const POST_RIDE_POSITIVE_FEEL_TAGS: PostRideFeelTagDefinition[] = [
+  {
+    id: 'light_legs',
+    label: 'Lekka noga',
+    physiologicalSystem: 'Wysoka świeżość nerwowo-mięśniowa',
+    isNegative: false,
+    scientificAdvice:
+      'Włókna szybkokurczliwe i zasoby glikogenu w pełnej gotowości — optymalne okno na akcenty Sweet Spot, Próg FTP lub VO2max.',
+  },
+  {
+    id: 'smooth_breathing',
+    label: 'Równy oddech',
+    physiologicalSystem: 'Wysoka ekonomia tlenowa (Efficiency Factor)',
+    isNegative: false,
+    scientificAdvice:
+      'Układ krążeniowo-oddechowy pracuje z niskim dryfem tętna — świetna adaptacja aerobowa.',
+  },
+  {
+    id: 'mental_flow',
+    label: 'Pełen fokus / Flow',
+    physiologicalSystem: 'Wysoka gotowość CNS i motywacja',
+    isNegative: false,
+    scientificAdvice:
+      'Niskie postrzeganie wysiłku (RPE) względem generowanych watów (stan Flow wg Csikszentmihalyi / Marcora).',
+  },
+  {
+    id: 'power_reserve',
+    label: 'Zapas mocy',
+    physiologicalSystem: 'Superkompensacja metaboliczna',
+    isNegative: false,
+    scientificAdvice:
+      'Organizm przewyższa założenia planu — jeśli kolejne sesje będą równie lekkie, rozważ test weryfikacyjny FTP lub +2–3% Bias w Kokpicie.',
+  },
+];
+
+export const ALL_POST_RIDE_FEEL_TAGS: PostRideFeelTagDefinition[] = [
+  ...POST_RIDE_NEGATIVE_FEEL_TAGS,
+  ...POST_RIDE_POSITIVE_FEEL_TAGS,
+];
+
+/**
+ * Converts our intuitive 1–10 Feel score (1 = very weak/exhausted, 10 = great/flow)
+ * into Intervals.icu's native `feel` scale (1 = Strong/Great, 2 = Good, 3 = Normal, 4 = Poor, 5 = Weak).
+ */
+export function mapFeel1To10ToIntervalsFeel1To5(feel1To10: number): number {
+  const clamped = Math.max(1, Math.min(10, Math.round(feel1To10)));
+  if (clamped >= 9) return 1; // 1 = Strong (Świetnie)
+  if (clamped >= 7) return 2; // 2 = Good (Dobrze)
+  if (clamped >= 5) return 3; // 3 = Normal (Normalnie)
+  if (clamped >= 3) return 4; // 4 = Poor (Słabo)
+  return 5; // 5 = Weak (Bardzo słabo / Wyczerpanie)
+}
+
+/**
+ * Estimates Intervals.icu `icu_rpe` (1–10 Borg CR10 Perceived Exertion)
+ * combining objective Intensity Factor (IF) and inverse subjective Feel (1–10).
+ */
+export function mapFeel1To10ToIntervalsRpe(
+  feel1To10: number,
+  intensityFactor: number = 0.75
+): number {
+  const clampedFeel = Math.max(1, Math.min(10, Math.round(feel1To10)));
+  const subjectiveHardness = 11 - clampedFeel; // 10 when feel=1, 1 when feel=10
+  const objectiveHardness = Math.max(1, Math.min(10, Math.round(intensityFactor * 8.5)));
+  return Math.max(
+    1,
+    Math.min(10, Math.round(subjectiveHardness * 0.65 + objectiveHardness * 0.35))
+  );
+}
+
+export function getFeelScoreVisualMeta(feel1To10?: number | null): {
+  score: number | null;
+  label: string;
+  shortLabel: string;
+  intervalsLabel: string;
+  textColorClass: string;
+  badgeClass: string;
+} {
+  if (!feel1To10 || feel1To10 < 1) {
+    return {
+      score: null,
+      label: 'Brak oceny odczuć',
+      shortLabel: 'Nieoceniony',
+      intervalsLabel: '—',
+      textColorClass: 'text-slate-400',
+      badgeClass: 'bg-slate-800/80 border-slate-700 text-slate-300',
+    };
+  }
+  const s = Math.max(1, Math.min(10, Math.round(feel1To10)));
+  if (s >= 9) {
+    return {
+      score: s,
+      label: `${s}/10 — Czułem się świetnie (Flow / Superkompensacja)`,
+      shortLabel: `${s}/10 Świetnie`,
+      intervalsLabel: 'Feel 1/5 (Strong)',
+      textColorClass: 'text-emerald-400',
+      badgeClass: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300',
+    };
+  }
+  if (s >= 7) {
+    return {
+      score: s,
+      label: `${s}/10 — Czułem się spoko / Dobrze`,
+      shortLabel: `${s}/10 Dobrze`,
+      intervalsLabel: 'Feel 2/5 (Good)',
+      textColorClass: 'text-sky-400',
+      badgeClass: 'bg-sky-500/20 border-sky-500/50 text-sky-300',
+    };
+  }
+  if (s >= 5) {
+    return {
+      score: s,
+      label: `${s}/10 — Umiarkowanie / Zgodnie z planem`,
+      shortLabel: `${s}/10 Średnio`,
+      intervalsLabel: 'Feel 3/5 (Normal)',
+      textColorClass: 'text-amber-300',
+      badgeClass: 'bg-amber-500/20 border-amber-500/50 text-amber-200',
+    };
+  }
+  if (s >= 3) {
+    return {
+      score: s,
+      label: `${s}/10 — Ciężko / Wyraźne zmęczenie`,
+      shortLabel: `${s}/10 Ciężko`,
+      intervalsLabel: 'Feel 4/5 (Poor)',
+      textColorClass: 'text-orange-400',
+      badgeClass: 'bg-orange-500/20 border-orange-500/50 text-orange-300',
+    };
+  }
+  return {
+    score: s,
+    label: `${s}/10 — Czułem się bardzo słabo / Kryzys`,
+    shortLabel: `${s}/10 Słabo`,
+    intervalsLabel: 'Feel 5/5 (Weak)',
+    textColorClass: 'text-rose-400',
+    badgeClass: 'bg-rose-500/20 border-rose-500/50 text-rose-300',
+  };
+}
+
+/**
+ * Classifies a ride into Banister & Meeusen's 4 Psychophysiological Quadrants
+ * comparing Objective Form (TSB = CTL - ATL) vs Subjective Feel (1-10).
+ */
+export function classifyPsychophysiologicalQuadrant(
+  tsb: number,
+  feelScore1To10: number
+): {
+  id: PsychophysiologicalQuadrantId;
+  title: string;
+  subtitle: string;
+  badgeColor: string;
+} {
+  const isFreshTsb = tsb >= -4;
+  const isGoodFeel = feelScore1To10 >= 7;
+
+  if (isFreshTsb && isGoodFeel) {
+    return {
+      id: 'flow_supercompensation',
+      title: 'I. Superkompensacja & Flow',
+      subtitle: 'Wysoka forma fizjologiczna (TSB) idzie w parze ze świetnym samopoczuciem',
+      badgeColor: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300',
+    };
+  }
+  if (!isFreshTsb && isGoodFeel) {
+    return {
+      id: 'functional_adaptation',
+      title: 'II. Adaptacja Funkcjonalna (Wysoka Tolerancja)',
+      subtitle: 'Dobre odczucia mimo ujemnego bilansu TSB — organizm wzorcowo absorbuje trening',
+      badgeColor: 'bg-sky-500/20 border-sky-500/50 text-sky-300',
+    };
+  }
+  if (!isFreshTsb && !isGoodFeel) {
+    return {
+      id: 'expected_fatigue',
+      title: 'III. Zmęczenie Fizjologiczne (Oczekiwane)',
+      subtitle: 'Gorsze samopoczucie wynika bezpośrednio z kumulacji obciążenia (niskie TSB)',
+      badgeColor: 'bg-amber-500/20 border-amber-500/50 text-amber-300',
+    };
+  }
+  return {
+    id: 'nfor_warning',
+    title: 'IV. Rozjazd Psychofizjologiczny (Alarm NFOR)',
+    subtitle: 'Słabe odczucia mimo wypoczętego TSB — sygnał przeciążenia CNS, niedoboru snu/glikogenu lub infekcji',
+    badgeColor: 'bg-rose-500/20 border-rose-500/50 text-rose-300',
+  };
+}
+
+/**
+ * Computes the comprehensive Psychophysiological Model Report combining:
+ * 1. Banister & Meeusen (ECSS/ACSM) 4-Quadrant Matrix (Objective Fitness/TSB vs Subjective Feel 1-10)
+ * 2. Carl Foster (1998, 2001) sRPE Internal-External Load Coupling Score
+ * 3. Rushall DALDA & Hooper Index Symptom Limiter Breakdown
+ */
+export function computePsychophysiologicalModelReport(
+  activities: CompletedActivity[],
+  wellnessSeries: WellnessDayMetric[],
+  profile: AthleteProfile,
+  periodFilter: string = 'last_30_days'
+): PsychophysiologicalModelReport {
+  const periodActivities = filterActivitiesByPeriod(activities, profile.id, periodFilter);
+  const wellnessByDate = new Map<string, WellnessDayMetric>();
+  for (const w of wellnessSeries) {
+    wellnessByDate.set(w.date, w);
+  }
+  const latestWellness = wellnessSeries[wellnessSeries.length - 1];
+  const fallbackTsb = latestWellness?.tsb ?? 0;
+  const fallbackCtl = latestWellness?.ctl ?? 34;
+
+  const quadrantCounts: Record<PsychophysiologicalQuadrantId, number> = {
+    flow_supercompensation: 0,
+    functional_adaptation: 0,
+    expected_fatigue: 0,
+    nfor_warning: 0,
+  };
+
+  const ridePoints: PsychophysiologicalRidePoint[] = [];
+  let sumFeel = 0;
+  let sumRpe = 0;
+  let sumEf = 0;
+  let efCount = 0;
+  let couplingSum = 0;
+
+  for (const act of periodActivities) {
+    if (typeof act.feelScore1To10 !== 'number' || act.feelScore1To10 < 1) {
+      continue;
+    }
+    const feel = Math.max(1, Math.min(10, Math.round(act.feelScore1To10)));
+    const dateStr = act.startedAtIso.slice(0, 10);
+    const dayWell = wellnessByDate.get(dateStr);
+    const tsbAtRide = dayWell?.tsb ?? fallbackTsb;
+    const ctlAtRide = dayWell?.ctl ?? fallbackCtl;
+
+    const rpe = mapFeel1To10ToIntervalsRpe(feel, act.intensityFactor);
+    const durationMin = Math.max(1, Math.round(act.durationSec / 60));
+    const sRpeLoadAu = durationMin * rpe;
+    const ef =
+      act.avgHrBpm > 40 && act.normalizedPowerWatts > 0
+        ? Number((act.normalizedPowerWatts / act.avgHrBpm).toFixed(2))
+        : null;
+
+    const quad = classifyPsychophysiologicalQuadrant(tsbAtRide, feel);
+    quadrantCounts[quad.id] += 1;
+
+    // Foster coupling per ride: expected feel given IF (e.g. IF 1.0 -> expected feel ~6.5, IF 0.65 -> expected feel ~8.0)
+    const expectedFeelForIf = Math.max(4, Math.min(9, 10.5 - act.intensityFactor * 4.2));
+    const deltaFeel = feel - expectedFeelForIf;
+    const rideCoupling = Math.max(20, Math.min(100, Math.round(78 + deltaFeel * 7)));
+    couplingSum += rideCoupling;
+
+    sumFeel += feel;
+    sumRpe += rpe;
+    if (ef !== null) {
+      sumEf += ef;
+      efCount += 1;
+    }
+
+    ridePoints.push({
+      activityId: act.id,
+      dateStr,
+      startedAtIso: act.startedAtIso,
+      workoutName: act.workoutName,
+      feelScore1To10: feel,
+      intervalsFeel1To5: mapFeel1To10ToIntervalsFeel1To5(feel),
+      sessionRpe1To10: rpe,
+      sRpeLoadAu,
+      tss: act.tss,
+      intensityFactor: act.intensityFactor,
+      efficiencyFactor: ef,
+      tsbAtRide,
+      ctlAtRide,
+      quadrantId: quad.id,
+      quadrantTitle: quad.title,
+      tags: act.feelSymptomTags || [],
+      notes: act.feelNotes,
+    });
+  }
+
+  const ratedRidesCount = ridePoints.length;
+  const avgFeelScore1To10 =
+    ratedRidesCount > 0 ? Number((sumFeel / ratedRidesCount).toFixed(1)) : null;
+  const avgSessionRpe =
+    ratedRidesCount > 0 ? Number((sumRpe / ratedRidesCount).toFixed(1)) : null;
+  const avgEfficiencyFactor =
+    efCount > 0 ? Number((sumEf / efCount).toFixed(2)) : null;
+  const fosterCouplingScore =
+    ratedRidesCount > 0 ? Math.round(couplingSum / ratedRidesCount) : 80;
+
+  // Compute DALDA / Hooper symptom frequency breakdown
+  const symptomBreakdown: DaldaSymptomCategoryStat[] = ALL_POST_RIDE_FEEL_TAGS.map((tagDef) => {
+    let count = 0;
+    for (const pt of ridePoints) {
+      if (pt.tags.includes(tagDef.label)) {
+        count += 1;
+      }
+    }
+    return {
+      id: tagDef.id,
+      tagLabel: tagDef.label,
+      physiologicalSystem: tagDef.physiologicalSystem,
+      count,
+      percentageOfRatedRides:
+        ratedRidesCount > 0 ? Math.round((count / ratedRidesCount) * 100) : 0,
+      isNegative: tagDef.isNegative,
+      scientificAdvice: tagDef.scientificAdvice,
+    };
+  });
+
+  const negativeSymptomsUsed = symptomBreakdown
+    .filter((s) => s.isNegative && s.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const dominantLimiter = negativeSymptomsUsed[0] || null;
+
+  // Determine current overall quadrant from most recent rated rides (weighted toward latest ride)
+  const latestRated = ridePoints[0];
+  const effectiveFeel = latestRated
+    ? Number((latestRated.feelScore1To10 * 0.65 + (avgFeelScore1To10 || latestRated.feelScore1To10) * 0.35).toFixed(1))
+    : 7.5;
+  const currentQuad = classifyPsychophysiologicalQuadrant(fallbackTsb, effectiveFeel);
+
+  let scientificDiagnosis =
+    'Oceń swoje pierwsze treningi w skali 1–10 po zakończeniu jazdy, aby aktywować pełną diagnostykę modelu Carl Foster (sRPE) oraz macierzy Banistera/Meeusena.';
+  let coachingRecommendation =
+    'Po każdej jeździe kliknij ocenę 1–10 oraz szybkie tagi (np. Ciężkie nogi, Równy oddech), a aplikacja automatycznie skoreluje je z Twoim CTL/ATL/TSB i wyśle do Intervals.icu.';
+
+  if (ratedRidesCount > 0) {
+    if (currentQuad.id === 'flow_supercompensation') {
+      scientificDiagnosis = `Model Banistera/Fostera wskazuje na wysoką zgodność psychofizjologiczną (Sprzężenie ${fosterCouplingScore}%). Dodatnia/neutralna forma (TSB ${fallbackTsb >= 0 ? `+${fallbackTsb}` : fallbackTsb}) pokrywa się z bardzo dobrym subiektywnym odbiorem bodźców (śr. ${avgFeelScore1To10}/10).`;
+      coachingRecommendation =
+        'Układ nerwowy (CNS) i mięśniowy są w fazie superkompensacji. To optymalne okno na realizację trudniejszych jednostek Threshold (Sweet Spot / Over-Unders) lub VO2max.';
+    } else if (currentQuad.id === 'functional_adaptation') {
+      scientificDiagnosis = `Wzorcowa Adaptacja Funkcjonalna (Sprzężenie ${fosterCouplingScore}%): mimo skumulowanego obciążenia treningowego (TSB ${fallbackTsb}) Twoje odczucia na rowerze pozostają wysokie (śr. ${avgFeelScore1To10}/10).`;
+      coachingRecommendation =
+        'Twój organizm świetnie toleruje obecny blok treningowy. Możesz kontynuować plan, pamiętając o co najmniej jednym lżejszym dniu Z1/Z2 w tygodniu na domknięcie superkompensacji.';
+    } else if (currentQuad.id === 'expected_fatigue') {
+      scientificDiagnosis = `Zmęczenie Fizjologiczne Zgodne z Obciążeniem: niższa ocena samopoczucia (śr. ${avgFeelScore1To10}/10) odpowiada ujemnemu bilansowi formy (TSB ${fallbackTsb}).`;
+      coachingRecommendation = dominantLimiter
+        ? `Główny czynnik limitujący wg DALDA: „${dominantLimiter.tagLabel}” (${dominantLimiter.physiologicalSystem}). ${dominantLimiter.scientificAdvice}`
+        : 'Zaplanuj 1–2 sesje Aktywnej Regeneracji Z1 lub spokojnego tlenu Z2 (30–45 min), aby odbudować TSB powyżej -5.';
+    } else {
+      scientificDiagnosis = `UWAGA — Wykryto Rozjazd Psychofizjologiczny (Ryzyko NFOR / Sprzężenie ${fosterCouplingScore}%): wskaźniki matematyczne sugerują wypoczynek (TSB ${fallbackTsb >= 0 ? `+${fallbackTsb}` : fallbackTsb}), ale Twoje subiektywne odczucia są niskie (ostatnia jazda ${latestRated?.feelScore1To10}/10).`;
+      coachingRecommendation = dominantLimiter
+        ? `Dominujący objaw alarmowy: „${dominantLimiter.tagLabel}” (${dominantLimiter.physiologicalSystem}). ${dominantLimiter.scientificAdvice}`
+        : 'Twarde dane TSS nie widzą stresu pozatreningowego (sen, praca, układ nerwowy). Zastąp dzisiejszy akcent luźnym rozjazdem 30 min Z1/Z2.';
+    }
+  }
+
+  return {
+    ratedRidesCount,
+    totalRidesCount: periodActivities.length,
+    avgFeelScore1To10,
+    avgSessionRpe,
+    avgEfficiencyFactor,
+    fosterCouplingScore,
+    currentQuadrantId: currentQuad.id,
+    currentQuadrantTitle: currentQuad.title,
+    currentQuadrantSubtitle: currentQuad.subtitle,
+    currentQuadrantBadgeColor: currentQuad.badgeColor,
+    scientificDiagnosis,
+    coachingRecommendation,
+    quadrantCounts,
+    symptomBreakdown,
+    dominantLimiter,
+    ridePoints,
+  };
+}
+
 
 

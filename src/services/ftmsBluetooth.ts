@@ -358,7 +358,6 @@ export class FtmsBikeController {
   private bleDevice: any = null;
   private extPowerDevice: any = null;
   private extHrDevice: any = null;
-  private simInterval: number | null = null;
   private hrStalenessInterval: number | null = null;
   private lastHrReceivedMs: number = 0;
   private recentPowers: number[] = [];
@@ -380,7 +379,6 @@ export class FtmsBikeController {
     reconnecting: false,
     reconnectAttempt: 0,
     deviceName: 'Brak połączenia',
-    isSimulator: false,
     externalPowerConnected: false,
     externalPowerDeviceName: '',
     externalHrConnected: false,
@@ -404,11 +402,10 @@ export class FtmsBikeController {
   };
 
   constructor() {
-    // Watchdog: if not in simulator and no valid HR packet has arrived in 10 seconds, clear stale HR to 0
+    // Watchdog: if no valid HR packet has arrived in 10 seconds, clear stale HR to 0
     if (typeof window !== 'undefined') {
       this.hrStalenessInterval = window.setInterval(() => {
         if (
-          !this.state.isSimulator &&
           this.state.heartRateBpm > 0 &&
           this.lastHrReceivedMs > 0 &&
           Date.now() - this.lastHrReceivedMs > 10000
@@ -564,7 +561,7 @@ export class FtmsBikeController {
     const lines: string[] = [];
     lines.push('=== DOMYOS CYCLING HUB — RAPORT DIAGNOSTYCZNY BLE (HEX SNIFFER) ===');
     lines.push(`Data zrzutu: ${new Date().toISOString()}`);
-    lines.push(`Urządzenie główne: ${this.state.deviceName} (Połączono: ${this.state.connected}, Symulator: ${this.state.isSimulator})`);
+    lines.push(`Urządzenie główne: ${this.state.deviceName} (Połączono: ${this.state.connected})`);
     lines.push(
       `Zewnętrzny pas HR (0x180D): ${
         this.state.externalHrConnected
@@ -848,7 +845,6 @@ export class FtmsBikeController {
     this.state.connected = true;
     this.state.reconnecting = false;
     this.state.reconnectAttempt = 0;
-    this.state.isSimulator = false;
     this.state.deviceName = device.name || 'Domyos Challenge Bike';
     this.emit();
 
@@ -910,7 +906,6 @@ export class FtmsBikeController {
     }
 
     try {
-      this.stopSimulator();
       this.resetLiveTelemetryOnModeSwitch();
       this.manualDisconnect = false;
       this.clearReconnectTimer();
@@ -1162,81 +1157,9 @@ export class FtmsBikeController {
     }
   }
 
-  public startSimulator() {
-    this.disconnectBle();
-    this.manualDisconnect = false;
-    this.state.connected = true;
-    this.state.reconnecting = false;
-    this.state.reconnectAttempt = 0;
-    this.state.isSimulator = true;
-    this.state.deviceName = 'Domyos Challenge Bike (Symulator FTMS)';
-    if (!this.state.externalHrConnected) {
-      this.state.heartRateBpm = 118;
-      this.state.hrSource = 'simulator';
-    }
-    this.state.cadenceRpm = 88;
-    this.emit();
-
-    if (this.simInterval) window.clearInterval(this.simInterval);
-    this.simInterval = window.setInterval(() => {
-      const targetW =
-        this.state.controlMode === 'erg_watts'
-          ? this.state.targetPowerWatts
-          : Math.round(this.state.targetResistanceLevel * 10.5);
-
-      const noise = Math.round((Math.random() - 0.5) * 6);
-      const simulatedPower = Math.max(
-        40,
-        Math.round(this.state.powerWatts * 0.35 + targetW * 0.65 + noise)
-      );
-      const simulatedCadence = Math.max(
-        65,
-        Math.min(
-          110,
-          88 +
-            Math.round((simulatedPower - 150) / 18) +
-            Math.round((Math.random() - 0.5) * 3)
-        )
-      );
-      const targetHr = Math.min(
-        192,
-        Math.max(95, 92 + Math.round(simulatedPower * 0.36))
-      );
-      const baseHr = this.state.heartRateBpm > 40 ? this.state.heartRateBpm : 115;
-      const simulatedHr = Math.round(baseHr + (targetHr - baseHr) * 0.08);
-      const { speedKmh } = calculate700cWheelSpeedAndDistance(simulatedCadence, 1);
-
-      this.ingestTelemetry({
-        powerWatts: simulatedPower,
-        cadenceRpm: simulatedCadence,
-        heartRateBpm: this.state.externalHrConnected
-          ? undefined
-          : simulatedHr,
-        hrSourceUsed: this.state.externalHrConnected
-          ? 'external_strap'
-          : 'simulator',
-        speedKmh,
-        resistanceLevel: this.state.targetResistanceLevel,
-      });
-    }, 1000);
-  }
-
-  public stopSimulator() {
-    if (this.simInterval) {
-      window.clearInterval(this.simInterval);
-      this.simInterval = null;
-    }
-    if (this.state.isSimulator) {
-      this.state.isSimulator = false;
-      this.resetLiveTelemetryOnModeSwitch();
-      this.emit();
-    }
-  }
-
   public disconnectBle() {
     this.manualDisconnect = true;
     this.clearReconnectTimer();
-    this.stopSimulator();
     try {
       if (this.bleDevice?.gatt?.connected) {
         this.bleDevice.gatt.disconnect();
@@ -1251,14 +1174,13 @@ export class FtmsBikeController {
     this.state.connected = false;
     this.state.reconnecting = false;
     this.state.reconnectAttempt = 0;
-    this.state.isSimulator = false;
     this.state.deviceName = 'Brak połączenia';
     this.controlPointChar = null;
     this.emit();
   }
 
   private hrRateResetCheck() {
-    if (!this.state.externalHrConnected && !this.state.isSimulator) {
+    if (!this.state.externalHrConnected) {
       this.state.heartRateBpm = 0;
       this.state.hrSource = 'none';
     }
@@ -1283,9 +1205,7 @@ export class FtmsBikeController {
     if (!this.state.externalHrConnected) {
       if (parsed.heartRateBpm !== undefined && parsed.heartRateBpm > 0) {
         this.state.heartRateBpm = parsed.heartRateBpm;
-        this.state.hrSource =
-          parsed.hrSourceUsed ||
-          (this.state.isSimulator ? 'simulator' : 'bike_ftms');
+        this.state.hrSource = parsed.hrSourceUsed || 'bike_ftms';
         this.lastHrReceivedMs = Date.now();
       }
     }

@@ -1,6 +1,0 @@
-{
-  "summary":  "Plan pelnego czyszczenia, refaktoryzacji i optymalizacji kodu Domyos Cycling Hub (naprawa ID rekomendacji dnia, ujednolicenie klucza profilu OPFS i usuniecie katalogu default, usuniecie zaszlosci Google Drive, deduplikacja helperow PWA/FIT oraz optymalizacja O(N) dla Peak Power i Normalized Power).",
-  "updatedAt":  "2026-11-11T12:07:31.630378725Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

@@ -234,9 +234,25 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
       : 999;
     const hadHardRideRecently =
       hoursSinceLastRide < 26 && (lastCompletedActivity?.tss || 0) >= 75;
+    const lastFeelScore =
+      hoursSinceLastRide < 36 ? lastCompletedActivity?.feelScore1To10 : undefined;
+    const lastFeelTags =
+      hoursSinceLastRide < 36 ? lastCompletedActivity?.feelSymptomTags || [] : [];
+    const hadSubjectiveCrisisRecently =
+      (typeof lastFeelScore === 'number' && lastFeelScore <= 4) ||
+      lastFeelTags.some((t) =>
+        [
+          'Ciężkie nogi',
+          'Ciężko się oddychało',
+          'Załamanie mentalne',
+          'Brak sił / Przemęczenie',
+        ].includes(t)
+      );
 
     let readinessSummary = `Optymalna gotowość treningowa (Forma TSB ${
       latestTsb >= 0 ? `+${latestTsb}` : latestTsb
+    }${
+      lastFeelScore ? ` · Ostatnie odczucia: ${lastFeelScore}/10` : ''
     }) — wybierz wariant krótki (30–45 min) lub pełny domowy (50–75 min, maks. 1h 20m).`;
 
     let shortPreferredIds = [
@@ -252,7 +268,29 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
     let shortSubtitle = 'Skondensowany bodziec Sweet Spot / FTP na dni z mniejszą ilością czasu';
     let standardSubtitle = 'Pełna jednostka domowa (54–75 min) budująca próg FTP i wytrzymałość';
 
-    if (latestTsb < -12 || hadHardRideRecently) {
+    if (hadSubjectiveCrisisRecently) {
+      const tagsInfo =
+        lastFeelTags.length > 0 ? ` [${lastFeelTags.join(', ')}]` : '';
+      readinessSummary = `Model Psychofizjologiczny (DALDA / Foster): po ostatniej jeździe zgłoszono niskie samopoczucie (${
+        lastFeelScore ?? '—'
+      }/10${tagsInfo}). Nawet przy TSB ${
+        latestTsb >= 0 ? `+${latestTsb}` : latestTsb
+      } zalecamy dziś odciążenie układu nerwowego i mięśniowego w Z1/Z2.`;
+      shortPreferredIds = [
+        'w_recovery_active_spin_30',
+        'w_recovery_openers_30',
+        'w_cardio_fatburn_z2',
+      ];
+      standardPreferredIds = [
+        'w_z2_steady_45',
+        'w_z2_cadence_bursts_50',
+        'w_z2_wave_endurance_60',
+      ];
+      shortSubtitle =
+        'Regeneracyjny rozjazd Z1/Z2 (30 min) na wysokich obrotach (>90 RPM) odciążający ciężkie nogi i CNS';
+      standardSubtitle =
+        'Spokojny tlen Z2 z ćwiczeniami kadencji (45–50 min) bez presji na waty progowe';
+    } else if (latestTsb < -12 || hadHardRideRecently) {
       readinessSummary = hadHardRideRecently
         ? `Po wczorajszym mocnym akcencie (${lastCompletedActivity?.tss} TSS) zalecany rozjazd lub spokojny tlen Z1/Z2.`
         : `Wysokie zmęczenie kumulacyjne (TSB ${latestTsb}) — dzisiaj regeneracja lub lekka baza tlenowa.`;
@@ -282,8 +320,12 @@ export const WorkoutsAndRampBuilderView: React.FC<WorkoutsAndRampBuilderViewProp
       ];
       shortSubtitle = 'Zwinna sesja tlenowa FatMax Z2 (40–45 min) przed pracą lub wieczorem';
       standardSubtitle = 'Klasyczna sesja wytrzymałościowa 1h 00m – 1h 15m w strefie Z2/Z3';
-    } else if (latestTsb >= 6) {
-      readinessSummary = `Wysoka świeżość (TSB +${latestTsb}) — idealny dzień na bodziec VO2max lub rozbudowany trening Sweet Spot / Próg!`;
+    } else if (latestTsb >= 6 || (lastFeelScore && lastFeelScore >= 8 && latestTsb >= -2)) {
+      readinessSummary = `Wysoka świeżość psychofizjologiczna (TSB ${
+        latestTsb >= 0 ? `+${latestTsb}` : latestTsb
+      }${
+        lastFeelScore ? ` · Odczucia Flow ${lastFeelScore}/10` : ''
+      }) — idealny dzień na bodziec VO2max lub rozbudowany trening Sweet Spot / Próg!`;
       shortPreferredIds = [
         'w_vo2_ronnestad_30_15',
         'w_vo2_seiler_4x4',

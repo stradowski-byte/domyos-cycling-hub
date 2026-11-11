@@ -7,13 +7,32 @@ import {
 } from '../types/cycling';
 import { encodeActivityToFitBlob } from './fitEncoder';
 import { ensureActivityHasRecords } from './firebaseSyncService';
-import { parseIntervalsWorkoutText } from './rampAndPhysiologyEngine';
+import {
+  mapFeel1To10ToIntervalsFeel1To5,
+  mapFeel1To10ToIntervalsRpe,
+  parseIntervalsWorkoutText,
+} from './rampAndPhysiologyEngine';
 
 const INTERVALS_BASE_URL = 'https://intervals.icu/api/v1';
 
 function buildBasicAuthHeader(apiKey: string): string {
   const token = btoa(`API_KEY:${apiKey.trim()}`);
   return `Basic ${token}`;
+}
+
+function buildIntervalsActivityDescription(activity: CompletedActivity): string {
+  const base = `Domyos Challenge Bike FTMS • Śr. moc: ${activity.avgPowerWatts}W • NP: ${activity.normalizedPowerWatts}W • TSS: ${activity.tss}`;
+  const feelParts: string[] = [];
+  if (typeof activity.feelScore1To10 === 'number' && activity.feelScore1To10 >= 1) {
+    feelParts.push(`Odczucia: ${activity.feelScore1To10}/10`);
+  }
+  if (activity.feelSymptomTags && activity.feelSymptomTags.length > 0) {
+    feelParts.push(`Objawy/Tagi: ${activity.feelSymptomTags.join(', ')}`);
+  }
+  if (activity.feelNotes && activity.feelNotes.trim()) {
+    feelParts.push(`Notatka: ${activity.feelNotes.trim()}`);
+  }
+  return feelParts.length > 0 ? `${base}\n[${feelParts.join(' • ')}]` : base;
 }
 
 /**
@@ -163,8 +182,63 @@ export async function fetchIntervalsPlannedAndLibraryWorkouts(
 }
 
 /**
+ * Updates subjective `feel` (1–5 in Intervals.icu), `icu_rpe` (1–10), and `description`
+ * on an existing Intervals.icu activity via PUT /api/v1/activities/{intervalsActivityId}
+ */
+export async function updateIntervalsActivityFeelAndNotes(
+  config: IntervalsConfig,
+  activity: CompletedActivity
+): Promise<{ ok: boolean; message: string }> {
+  if (!config.enabled || !config.apiKey.trim()) {
+    return { ok: false, message: 'Integracja Intervals.icu nie jest aktywna.' };
+  }
+  if (!activity.intervalsActivityId) {
+    return { ok: false, message: 'Brak identyfikatora aktywności Intervals.icu.' };
+  }
+  if (typeof activity.feelScore1To10 !== 'number' || activity.feelScore1To10 < 1) {
+    return { ok: false, message: 'Brak oceny odczuć (1–10).' };
+  }
+
+  const feel1To5 = mapFeel1To10ToIntervalsFeel1To5(activity.feelScore1To10);
+  const icuRpe = mapFeel1To10ToIntervalsRpe(
+    activity.feelScore1To10,
+    activity.intensityFactor
+  );
+  const description = buildIntervalsActivityDescription(activity);
+
+  const res = await fetch(
+    `${INTERVALS_BASE_URL}/activities/${encodeURIComponent(activity.intervalsActivityId)}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: buildBasicAuthHeader(config.apiKey),
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        feel: feel1To5,
+        icu_rpe: icuRpe,
+        description,
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: `Nie udało się zaktualizować odczuć w Intervals.icu (status ${res.status}).`,
+    };
+  }
+
+  return {
+    ok: true,
+    message: `Zaktualizowano odczucia (${activity.feelScore1To10}/10 → Feel ${feel1To5}/5, RPE ${icuRpe}/10) w Intervals.icu!`,
+  };
+}
+
+/**
  * Uploads a completed activity's binary .FIT file directly to Intervals.icu
- * via POST /api/v1/athlete/{id}/activities
+ * via POST /api/v1/athlete/{id}/activities and syncs subjective Feel/RPE if present.
  */
 export async function uploadActivityFitToIntervals(
   config: IntervalsConfig,
@@ -184,7 +258,7 @@ export async function uploadActivityFitToIntervals(
 
   const query = new URLSearchParams({
     name: activity.workoutName,
-    description: `Domyos Challenge Bike FTMS • Śr. moc: ${activity.avgPowerWatts}W • NP: ${activity.normalizedPowerWatts}W • TSS: ${activity.tss}`,
+    description: buildIntervalsActivityDescription(activity),
     external_id: activity.id,
   });
 
@@ -207,9 +281,20 @@ export async function uploadActivityFitToIntervals(
   }
 
   const data = await res.json().catch(() => ({}));
+  const activityId = data?.id ? String(data.id) : undefined;
+
+  // If rider already selected post-ride feel (1-10) or tags, sync them to the newly created Intervals.icu activity
+  if (activityId && typeof activity.feelScore1To10 === 'number' && activity.feelScore1To10 >= 1) {
+    await updateIntervalsActivityFeelAndNotes(config, {
+      ...activity,
+      intervalsActivityId: activityId,
+    }).catch(() => {});
+  }
+
   return {
     ok: true,
-    activityId: data?.id ? String(data.id) : undefined,
+    activityId,
     message: 'Pomyślnie przesłano plik .FIT do Intervals.icu!',
   };
 }
+
