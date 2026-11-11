@@ -8,7 +8,6 @@ import {
   SkipBack,
   Square,
   Bluetooth,
-  Sliders,
   ArrowLeft,
   AlertTriangle,
   Maximize2,
@@ -18,6 +17,7 @@ import {
   RefreshCw,
   Lock,
   CheckCircle2,
+  HelpCircle,
 } from 'lucide-react';
 import {
   AthleteProfile,
@@ -40,6 +40,7 @@ import {
 } from './BlePacketSnifferModal';
 import { forceUpdatePwaAndClearCaches } from '../services/usePWAInstall';
 import { PostRideFeelSelector } from './PostRideFeelSelector';
+import { CockpitHelpGuideModal } from './CockpitHelpGuideModal';
 
 export interface InitialWorkoutFeelPayload {
   feelScore1To10: number;
@@ -73,7 +74,6 @@ interface LiveCockpitViewProps {
   onChangeResistance: (deltaLevel: number) => void;
   onToggleSound: () => void;
   onConnectDomyos: () => Promise<void> | void;
-  onConnectExternalPower: () => Promise<void> | void;
   onConnectExternalHrStrap?: () => Promise<void>;
   onDisconnectExternalHrStrap?: () => void;
   onNotifyToast?: (msg: string) => void;
@@ -166,7 +166,6 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
   onChangeResistance,
   onToggleSound,
   onConnectDomyos,
-  onConnectExternalPower,
   onConnectExternalHrStrap,
   onDisconnectExternalHrStrap,
   onNotifyToast,
@@ -179,6 +178,7 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
 }) => {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [isSnifferModalOpen, setIsSnifferModalOpen] = useState(false);
+  const [isHelpGuideOpen, setIsHelpGuideOpen] = useState(false);
   const [isBleDisconnectModalOpen, setIsBleDisconnectModalOpen] =
     useState(false);
 
@@ -458,16 +458,6 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
     }
   };
 
-  const handlePowerMeterButtonClick = () => {
-    if (isRunning && telemetry.externalPowerConnected) {
-      onNotifyToast?.(
-        'Miernik mocy (Power Match) jest zablokowany na czas trwania treningu.'
-      );
-      return;
-    }
-    void onConnectExternalPower();
-  };
-
   return (
     <div className="min-h-[calc(100dvh-118px)] md:h-[calc(100dvh-76px)] flex flex-col justify-between gap-1 sm:gap-1.5 select-none max-w-full overflow-x-hidden">
       {/* 1. COMPACT GARMIN STATUS & LOCKED BIKE CONNECTION HEADER */}
@@ -572,11 +562,12 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           </button>
 
           <button
-            onClick={handlePowerMeterButtonClick}
-            className="min-h-[34px] px-2 py-1 rounded-lg bg-[#0B0F17] border border-slate-700 text-slate-300 hover:text-white text-[11px] flex items-center"
-            title="Sparuj zewnętrzny miernik mocy (Power Match)"
+            onClick={() => setIsHelpGuideOpen(true)}
+            className="min-h-[34px] px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1 transition-colors"
+            title="Pomoc i przewodnik po elementach Kokpitu (3 strony)"
           >
-            <Sliders className="w-3.5 h-3.5" />
+            <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>?</span>
           </button>
 
           <button
@@ -1438,6 +1429,12 @@ export const LiveCockpitView: React.FC<LiveCockpitViewProps> = ({
           }
         }}
         onNotifyToast={onNotifyToast}
+      />
+
+      {/* 3-PAGE COCKPIT INTERFACE HELP OVERLAY (?) */}
+      <CockpitHelpGuideModal
+        isOpen={isHelpGuideOpen}
+        onClose={() => setIsHelpGuideOpen(false)}
       />
     </div>
   );

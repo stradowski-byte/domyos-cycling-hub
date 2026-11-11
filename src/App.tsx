@@ -2071,10 +2071,6 @@ export default function App() {
               const res = await ftmsController.connectDomyosBle();
               showToast(res.message);
             }}
-            onConnectExternalPower={async () => {
-              const res = await ftmsController.connectExternalPowerMeter();
-              showToast(res.message);
-            }}
             onConnectExternalHrStrap={async () => {
               const res = await ftmsController.connectExternalHeartRateStrap();
               showToast(res.message);
